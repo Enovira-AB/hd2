@@ -10,7 +10,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { generateLayout, terrainHeight, mulberry32, type WorldLayout } from '../../shared/world.js';
 import { MAP_HALF } from '../../shared/constants.js';
-import { makeGlowSprite, softCircleTexture, terrainSpeckleTexture } from './textures.js';
+import { makeGlowSprite, rockMaps, softCircleTexture, terrainSpeckleTexture } from './textures.js';
 
 // custom sky: vertical gradient, horizon glow band and slow aurora curtains
 const SkyShader = {
@@ -321,7 +321,11 @@ export class World3D {
 
     // rocks, instanced
     const rockGeo = new THREE.IcosahedronGeometry(1, 1);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x3b4148, roughness: 0.95, flatShading: true });
+    const rockTex = rockMaps();
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: 0x4c545c, map: rockTex.map, normalMap: rockTex.normalMap,
+      normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.95, flatShading: true,
+    });
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, this.layout.rocks.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();

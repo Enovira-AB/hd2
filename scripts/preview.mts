@@ -57,13 +57,48 @@ function writePng(path: string, px: Buffer) {
 
 // ---- triangle collection ---------------------------------------------------------
 
+interface TexRef {
+  data: Uint8Array;
+  w: number;
+  h: number;
+  repX: number;
+  repY: number;
+}
+
 interface Tri {
   a: THREE.Vector3;
   b: THREE.Vector3;
   c: THREE.Vector3;
+  uva: THREE.Vector2;
+  uvb: THREE.Vector2;
+  uvc: THREE.Vector2;
+  tex: TexRef | null;
   color: THREE.Color;
   emissive: THREE.Color;
   ei: number;
+}
+
+function texRefOf(mat: THREE.MeshStandardMaterial): TexRef | null {
+  const map = mat.map as THREE.DataTexture | null;
+  if (!map || !(map as { isDataTexture?: boolean }).isDataTexture) return null;
+  const img = map.image as { data: Uint8Array; width: number; height: number };
+  return { data: img.data, w: img.width, h: img.height, repX: map.repeat.x, repY: map.repeat.y };
+}
+
+// nearest-neighbour sample, sRGB -> linear
+function sampleTex(tex: TexRef, u: number, v: number, out: THREE.Color) {
+  let uu = (u * tex.repX) % 1;
+  let vv = (v * tex.repY) % 1;
+  if (uu < 0) uu += 1;
+  if (vv < 0) vv += 1;
+  const x = Math.min(tex.w - 1, Math.floor(uu * tex.w));
+  const y = Math.min(tex.h - 1, Math.floor(vv * tex.h));
+  const i = (y * tex.w + x) * 4;
+  out.setRGB(
+    Math.pow(tex.data[i] / 255, 2.2),
+    Math.pow(tex.data[i + 1] / 255, 2.2),
+    Math.pow(tex.data[i + 2] / 255, 2.2),
+  );
 }
 
 interface Splat {
@@ -104,11 +139,15 @@ function collect(root: THREE.Object3D): Tri[] {
     const geom = mesh.geometry as THREE.BufferGeometry;
     const pos = geom.attributes.position as THREE.BufferAttribute;
     if (!pos) return;
+    const uv = geom.attributes.uv as THREE.BufferAttribute | undefined;
     const index = geom.index;
     const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial;
     const color = m.color ?? new THREE.Color(1, 1, 1);
     const emissive = m.emissive ?? new THREE.Color(0, 0, 0);
     const ei = m.emissiveIntensity ?? 1;
+    const tex = uv ? texRefOf(m) : null;
+    const uvOf = (idx: number) =>
+      uv ? new THREE.Vector2().fromBufferAttribute(uv, idx) : new THREE.Vector2();
     const count = index ? index.count : pos.count;
     for (let i = 0; i + 2 < count; i += 3) {
       const ia = index ? index.getX(i) : i;
@@ -118,6 +157,7 @@ function collect(root: THREE.Object3D): Tri[] {
         a: new THREE.Vector3().fromBufferAttribute(pos, ia).applyMatrix4(mesh.matrixWorld),
         b: new THREE.Vector3().fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld),
         c: new THREE.Vector3().fromBufferAttribute(pos, ic).applyMatrix4(mesh.matrixWorld),
+        uva: uvOf(ia), uvb: uvOf(ib), uvc: uvOf(ic), tex,
         color, emissive, ei,
       });
     }
@@ -202,17 +242,18 @@ function render(root: THREE.Object3D, shot: Shot) {
     const toCam = new THREE.Vector3().subVectors(camPos, centroid).normalize();
     if (n.dot(toCam) < 0) n.negate();
 
-    let r: number;
-    let g: number;
-    let b: number;
+    // per-face lighting WITHOUT albedo; albedo is sampled per pixel
+    let lr: number;
+    let lg: number;
+    let lb: number;
     if (shot.mode === 'studio') {
       const key = Math.max(0, n.dot(keyDir)) * 1.0;
       const fill = Math.max(0, n.dot(fillDir)) * 0.3;
       const rim = Math.pow(Math.max(0, n.dot(rimDir)), 2) * 0.6;
       const amb = 0.34;
-      r = t.color.r * (amb + key + fill * 0.8 + rim * 0.9);
-      g = t.color.g * (amb + key + fill * 0.9 + rim * 0.95);
-      b = t.color.b * (amb + key + fill * 1.1 + rim);
+      lr = amb + key + fill * 0.8 + rim * 0.9;
+      lg = amb + key + fill * 0.9 + rim * 0.95;
+      lb = amb + key + fill * 1.1 + rim;
     } else {
       const amb = 0.085;
       const moon = Math.max(0, n.dot(moonDir)) * 0.4;
@@ -222,27 +263,13 @@ function render(root: THREE.Object3D, shot: Shot) {
       toC.normalize();
       const cone = Math.pow(Math.max(0, toC.dot(camDir)), 14);
       const torch = (Math.max(0, n.dot(toCam)) * cone * 30) / (d * d + 6);
-      r = t.color.r * (amb + moon * moonCol.r) + t.color.r * torch * torchCol.r;
-      g = t.color.g * (amb + moon * moonCol.g) + t.color.g * torch * torchCol.g;
-      b = t.color.b * (amb + moon * moonCol.b) + t.color.b * torch * torchCol.b;
+      lr = amb + moon * moonCol.r + torch * torchCol.r;
+      lg = amb + moon * moonCol.g + torch * torchCol.g;
+      lb = amb + moon * moonCol.b + torch * torchCol.b;
     }
-    r += t.emissive.r * t.ei;
-    g += t.emissive.g * t.ei;
-    b += t.emissive.b * t.ei;
-
-    if (shot.mode === 'night') {
-      const d = centroid.distanceTo(camPos);
-      const f = 1 - Math.exp(-Math.pow(d * 0.05, 2));
-      r = r * (1 - f) + fogColor.r * f;
-      g = g * (1 - f) + fogColor.g * f;
-      b = b * (1 - f) + fogColor.b * f;
-      r = aces(r * 1.4);
-      g = aces(g * 1.4);
-      b = aces(b * 1.4);
-    }
-    const R = Math.min(255, Math.pow(Math.max(0, r), 1 / 2.2) * 255);
-    const G = Math.min(255, Math.pow(Math.max(0, g), 1 / 2.2) * 255);
-    const B = Math.min(255, Math.pow(Math.max(0, b), 1 / 2.2) * 255);
+    const fogF = shot.mode === 'night'
+      ? 1 - Math.exp(-Math.pow(centroid.distanceTo(camPos) * 0.05, 2))
+      : 0;
 
     // rasterize
     const minX = Math.max(0, Math.floor(Math.min(sa.x, sb.x, sc.x)));
@@ -251,6 +278,7 @@ function render(root: THREE.Object3D, shot: Shot) {
     const maxY = Math.min(H - 1, Math.ceil(Math.max(sa.y, sb.y, sc.y)));
     const area = (sb.x - sa.x) * (sc.y - sa.y) - (sb.y - sa.y) * (sc.x - sa.x);
     if (Math.abs(area) < 1e-6) continue;
+    const texel = new THREE.Color(1, 1, 1);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const w0 = ((sb.x - sa.x) * (y + 0.5 - sa.y) - (sb.y - sa.y) * (x + 0.5 - sa.x)) / area;
@@ -261,10 +289,31 @@ function render(root: THREE.Object3D, shot: Shot) {
         const idx = y * W + x;
         if (z >= zbuf[idx]) continue;
         zbuf[idx] = z;
+
+        let ar = t.color.r;
+        let ag = t.color.g;
+        let ab = t.color.b;
+        if (t.tex) {
+          // vertex weights: a:w1, b:w2, c:w0 (matches the z interpolation)
+          const u = t.uva.x * w1 + t.uvb.x * w2 + t.uvc.x * w0;
+          const v = t.uva.y * w1 + t.uvb.y * w2 + t.uvc.y * w0;
+          sampleTex(t.tex, u, v, texel);
+          ar *= texel.r;
+          ag *= texel.g;
+          ab *= texel.b;
+        }
+        let r = ar * lr + t.emissive.r * t.ei;
+        let g = ag * lg + t.emissive.g * t.ei;
+        let b = ab * lb + t.emissive.b * t.ei;
+        if (shot.mode === 'night') {
+          r = aces((r * (1 - fogF) + fogColor.r * fogF) * 1.4);
+          g = aces((g * (1 - fogF) + fogColor.g * fogF) * 1.4);
+          b = aces((b * (1 - fogF) + fogColor.b * fogF) * 1.4);
+        }
         const i = idx * 4;
-        px[i] = R;
-        px[i + 1] = G;
-        px[i + 2] = B;
+        px[i] = Math.min(255, Math.pow(Math.max(0, r), 1 / 2.2) * 255);
+        px[i + 1] = Math.min(255, Math.pow(Math.max(0, g), 1 / 2.2) * 255);
+        px[i + 2] = Math.min(255, Math.pow(Math.max(0, b), 1 / 2.2) * 255);
         px[i + 3] = 255;
       }
     }

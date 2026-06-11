@@ -4,6 +4,7 @@
 // there when changing anything.
 
 import * as THREE from 'three';
+import { armorMaps, capeTexture } from './textures.js';
 
 export const CAPE_COLORS = [0x6b2127, 0x1f3a63, 0x2a5a32, 0x5a4a1f];
 
@@ -35,9 +36,19 @@ function cyl(r: number, h: number, mat: THREE.Material, x = 0, y = 0, z = 0): TH
 }
 
 export function buildSoldier(colorIndex: number, castShadow: boolean): SoldierRig {
-  const armor = new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.55, metalness: 0.35 });
-  const armorLight = new THREE.MeshStandardMaterial({ color: 0x5d656e, roughness: 0.5, metalness: 0.4 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.8, metalness: 0.2 });
+  const plate = armorMaps();
+  const normalScale = new THREE.Vector2(0.6, 0.6);
+  const armor = new THREE.MeshStandardMaterial({
+    color: 0x565d66, map: plate.map, normalMap: plate.normalMap, normalScale,
+    roughness: 0.55, metalness: 0.35,
+  });
+  const armorLight = new THREE.MeshStandardMaterial({
+    color: 0x6c757f, map: plate.map, normalMap: plate.normalMap, normalScale,
+    roughness: 0.5, metalness: 0.4,
+  });
+  const dark = new THREE.MeshStandardMaterial({
+    color: 0x2b2f35, map: plate.map, roughness: 0.8, metalness: 0.2,
+  });
   const stripe = new THREE.MeshStandardMaterial({
     color: 0xd9a834, emissive: 0xd9a834, emissiveIntensity: 0.3, roughness: 0.5,
   });
@@ -45,9 +56,13 @@ export function buildSoldier(colorIndex: number, castShadow: boolean): SoldierRi
     color: 0x0c0f12, emissive: 0x86d9ff, emissiveIntensity: 2.0, roughness: 0.3,
   });
   const capeMat = new THREE.MeshStandardMaterial({
-    color: CAPE_COLORS[colorIndex % CAPE_COLORS.length], roughness: 1, side: THREE.DoubleSide,
+    color: 0xffffff, map: capeTexture(CAPE_COLORS[colorIndex % CAPE_COLORS.length]),
+    roughness: 1, side: THREE.DoubleSide,
   });
-  const gunMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.6, metalness: 0.5 });
+  const gunMat = new THREE.MeshStandardMaterial({
+    color: 0x23262b, map: plate.map, normalMap: plate.normalMap, normalScale,
+    roughness: 0.6, metalness: 0.5,
+  });
 
   const group = new THREE.Group();
 

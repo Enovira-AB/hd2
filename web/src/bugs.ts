@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { BUG_KINDS } from '../../shared/constants.js';
-import { makeGlowSprite } from './textures.js';
+import { chitinMaps, makeGlowSprite } from './textures.js';
 
 export interface BugRig {
   group: THREE.Group;
@@ -28,11 +28,17 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
   const scale = def.radius / 0.55;
   const isWarrior = kind === 1;
 
+  const chitin = chitinMaps();
+  const chitinScale = new THREE.Vector2(0.8, 0.8);
   const shellMat = new THREE.MeshStandardMaterial({
-    color: isWarrior ? 0x261e16 : 0x322a22, roughness: 0.6, metalness: 0.15, flatShading: true,
+    color: isWarrior ? 0x33291d : 0x42372c,
+    map: chitin.map, normalMap: chitin.normalMap, normalScale: chitinScale,
+    roughness: 0.6, metalness: 0.15, flatShading: true,
   });
   const shellDark = new THREE.MeshStandardMaterial({
-    color: isWarrior ? 0x1a1410 : 0x241d16, roughness: 0.7, metalness: 0.1, flatShading: true,
+    color: isWarrior ? 0x231b13 : 0x30271d,
+    map: chitin.map, normalMap: chitin.normalMap, normalScale: chitinScale,
+    roughness: 0.7, metalness: 0.1, flatShading: true,
   });
   const boneMat = new THREE.MeshStandardMaterial({
     color: 0xcfc6b0, roughness: 0.55, flatShading: true,
