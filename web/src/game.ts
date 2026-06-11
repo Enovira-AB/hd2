@@ -11,6 +11,10 @@ import { Sfx } from './sfx.js';
 import { Hud } from './hud.js';
 import { buildSoldier, animateSoldier, makeNameSprite, type SoldierRig } from './soldier.js';
 import { buildBug, animateBug, type BugRig } from './bugs.js';
+import {
+  animateInstance, findNode, getBugModel, getSoldierModel, instantiate,
+  type ModelInstance,
+} from './models.js';
 import { ANIM, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
   MISSION, ORBITAL_RADIUS, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
@@ -18,16 +22,22 @@ import {
 } from '../../shared/constants.js';
 import { resolveCollisions } from '../../shared/world.js';
 
+// A view renders either a drop-in GLB (custom) or the procedural rig.
 interface SoldierView {
-  rig: SoldierRig;
+  group: THREE.Group;
+  rig: SoldierRig | null;
+  custom: ModelInstance | null;
+  muzzle: THREE.Object3D;
+  flashlight: THREE.SpotLight;
   lastPos: THREE.Vector3;
   speed: number;
   hideUntil: number;
-  colorIdx: number;
 }
 
 interface BugView {
-  rig: BugRig;
+  group: THREE.Group;
+  rig: BugRig | null;
+  custom: ModelInstance | null;
   lastPos: THREE.Vector3;
   speed: number;
 }
@@ -103,7 +113,7 @@ export class Game {
       }
       const view = this.views.get(m.id);
       const muzzle = new THREE.Vector3();
-      if (view) view.rig.muzzle.getWorldPosition(muzzle);
+      if (view) view.muzzle.getWorldPosition(muzzle);
       else muzzle.copy(origin);
       const end = hit ?? origin.clone().addScaledVector(new THREE.Vector3(...m.dir), 120);
       this.fx.tracer(muzzle, end, () => {
@@ -112,7 +122,7 @@ export class Game {
       this.fx.muzzleFlash(muzzle);
       const d = this.pos.distanceTo(origin);
       this.sfx.fire(Math.max(0.15, 1 - d / 80));
-      if (view) view.rig.recoil = 1;
+      if (view?.rig) view.rig.recoil = 1;
     });
 
     n.on('bugDeath', (m) => {
@@ -122,7 +132,7 @@ export class Game {
       this.sfx.screech(Math.max(0.1, 1 - this.pos.distanceTo(pos) / 60));
       const view = this.bugViews.get(m.id);
       if (view) {
-        this.world.scene.remove(view.rig.group);
+        this.world.scene.remove(view.group);
         this.bugViews.delete(m.id);
       }
     });
@@ -276,8 +286,8 @@ export class Game {
     if (m.seed !== this.currentSeed) {
       this.currentSeed = m.seed;
       this.world.buildWorld(m.seed);
-      for (const v of this.views.values()) this.world.scene.remove(v.rig.group);
-      for (const b of this.bugViews.values()) this.world.scene.remove(b.rig.group);
+      for (const v of this.views.values()) this.world.scene.remove(v.group);
+      for (const b of this.bugViews.values()) this.world.scene.remove(b.group);
       for (const s of this.supplyViews.values()) this.world.scene.remove(s);
       this.views.clear();
       this.bugViews.clear();
@@ -461,8 +471,8 @@ export class Game {
     const view = this.views.get(this.net.selfId);
     const muzzle = new THREE.Vector3();
     if (view) {
-      view.rig.muzzle.getWorldPosition(muzzle);
-      view.rig.recoil = 1;
+      view.muzzle.getWorldPosition(muzzle);
+      if (view.rig) view.rig.recoil = 1;
     } else {
       muzzle.copy(eye);
     }
@@ -504,6 +514,35 @@ export class Game {
 
   // ---- views ------------------------------------------------------------------------
 
+  private createSoldierView(colorIdx: number): SoldierView {
+    const castShadow = !this.world.mobile;
+    const model = getSoldierModel();
+    if (model) {
+      const custom = instantiate(model, castShadow);
+      const flashlight = new THREE.SpotLight(0xfff0d4, 0, 46, 0.34, 0.5, 1.7);
+      flashlight.position.set(0, 1.5, 0.25);
+      const flashTarget = new THREE.Object3D();
+      flashTarget.position.set(0, 1.2, 12);
+      flashlight.target = flashTarget;
+      custom.group.add(flashlight, flashTarget);
+      let muzzle = findNode(custom.group, /muzzle|barrel|gun|weapon/i);
+      if (!muzzle) {
+        muzzle = new THREE.Object3D();
+        muzzle.position.set(0.25, 1.42, 0.6);
+        custom.group.add(muzzle);
+      }
+      return {
+        group: custom.group, rig: null, custom, muzzle, flashlight,
+        lastPos: new THREE.Vector3(), speed: 0, hideUntil: 0,
+      };
+    }
+    const rig = buildSoldier(colorIdx, castShadow);
+    return {
+      group: rig.group, rig, custom: null, muzzle: rig.muzzle, flashlight: rig.flashlight,
+      lastPos: new THREE.Vector3(), speed: 0, hideUntil: 0,
+    };
+  }
+
   private reconcileViews(dt: number, time: number) {
     const { players, bugs } = this.net.sample();
     const now = performance.now();
@@ -515,10 +554,10 @@ export class Game {
       if (!view) {
         if (!this.colorAssign.has(p.id)) this.colorAssign.set(p.id, this.colorAssign.size % 4);
         const colorIdx = this.colorAssign.get(p.id)!;
-        const rig = buildSoldier(colorIdx, !this.world.mobile);
-        if (p.id !== this.net.selfId) rig.group.add(makeNameSprite(p.name));
-        this.world.scene.add(rig.group);
-        view = { rig, lastPos: new THREE.Vector3(...p.pos), speed: 0, hideUntil: 0, colorIdx };
+        view = this.createSoldierView(colorIdx);
+        if (p.id !== this.net.selfId) view.group.add(makeNameSprite(p.name));
+        this.world.scene.add(view.group);
+        view.lastPos.set(...p.pos);
         this.views.set(p.id, view);
       }
 
@@ -539,38 +578,46 @@ export class Game {
         this.localReserve = p.reserve;
         this.boarded = p.boarded;
 
-        view.rig.group.position.copy(this.pos);
-        view.rig.group.rotation.y = this.yaw;
+        view.group.position.copy(this.pos);
+        view.group.rotation.y = this.yaw;
         view.speed = this.vel.length();
-        animateSoldier(view.rig, dt, {
-          speed: view.speed,
-          pitch: this.pitch,
-          reloading: now < this.reloadUntil,
-          dead: !this.alive,
-          time,
-        });
-        view.rig.flashlight.intensity = this.alive ? 320 : 0;
+        if (view.custom) {
+          animateInstance(view.custom, dt, view.speed, !this.alive);
+        } else if (view.rig) {
+          animateSoldier(view.rig, dt, {
+            speed: view.speed,
+            pitch: this.pitch,
+            reloading: now < this.reloadUntil,
+            dead: !this.alive,
+            time,
+          });
+        }
+        view.flashlight.intensity = this.alive ? 320 : 0;
       } else {
         const target = new THREE.Vector3(...p.pos);
         view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
         view.lastPos.copy(target);
-        view.rig.group.position.copy(target);
-        view.rig.group.rotation.y = p.yaw;
-        animateSoldier(view.rig, dt, {
-          speed: Math.min(view.speed, 9),
-          pitch: p.pitch,
-          reloading: (p.anim & ANIM.RELOADING) !== 0,
-          dead,
-          time,
-        });
-        view.rig.flashlight.intensity = dead ? 0 : 210;
+        view.group.position.copy(target);
+        view.group.rotation.y = p.yaw;
+        if (view.custom) {
+          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead);
+        } else if (view.rig) {
+          animateSoldier(view.rig, dt, {
+            speed: Math.min(view.speed, 9),
+            pitch: p.pitch,
+            reloading: (p.anim & ANIM.RELOADING) !== 0,
+            dead,
+            time,
+          });
+        }
+        view.flashlight.intensity = dead ? 0 : 210;
       }
-      view.rig.group.visible = !p.boarded && now >= view.hideUntil;
+      view.group.visible = !p.boarded && now >= view.hideUntil;
     }
 
     for (const [id, view] of this.views) {
       if (!seen.has(id)) {
-        this.world.scene.remove(view.rig.group);
+        this.world.scene.remove(view.group);
         this.views.delete(id);
       }
     }
@@ -580,21 +627,29 @@ export class Game {
       seenBugs.add(b.id);
       let view = this.bugViews.get(b.id);
       if (!view) {
-        const rig = buildBug(b.kind, !this.world.mobile && this.bugViews.size < 24);
-        this.world.scene.add(rig.group);
-        view = { rig, lastPos: new THREE.Vector3(...b.pos), speed: 0 };
+        const castShadow = !this.world.mobile && this.bugViews.size < 24;
+        const model = getBugModel(b.kind);
+        if (model) {
+          const custom = instantiate(model, castShadow);
+          view = { group: custom.group, rig: null, custom, lastPos: new THREE.Vector3(...b.pos), speed: 0 };
+        } else {
+          const rig = buildBug(b.kind, castShadow);
+          view = { group: rig.group, rig, custom: null, lastPos: new THREE.Vector3(...b.pos), speed: 0 };
+        }
+        this.world.scene.add(view.group);
         this.bugViews.set(b.id, view);
       }
       const target = new THREE.Vector3(b.pos[0], b.pos[1] - 0.42, b.pos[2]);
       view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
       view.lastPos.copy(target);
-      view.rig.group.position.copy(target);
-      view.rig.group.rotation.y = b.yaw;
-      animateBug(view.rig, dt, Math.min(view.speed, 8), time);
+      view.group.position.copy(target);
+      view.group.rotation.y = b.yaw;
+      if (view.custom) animateInstance(view.custom, dt, Math.min(view.speed, 8), false);
+      else if (view.rig) animateBug(view.rig, dt, Math.min(view.speed, 8), time);
     }
     for (const [id, view] of this.bugViews) {
       if (!seenBugs.has(id)) {
-        this.world.scene.remove(view.rig.group);
+        this.world.scene.remove(view.group);
         this.bugViews.delete(id);
       }
     }

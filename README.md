@@ -91,11 +91,21 @@ ios/        Swift/SceneKit client scaffold + porting contract (needs a Mac)
 scripts/    integration tests + icon generator
 ```
 
+## Drop-in 3D models (optional)
+
+The default look is procedural primitives sold by lighting. Want real assets?
+Drop GLB files into `web/public/models/` (`soldier.glb`, `bug0.glb`,
+`bug1.glb`) and they replace the primitives automatically — skeletal
+`Idle/Run/Death` clips are picked up by name, models are auto-scaled and
+grounded. See `web/public/models/README.md` for a one-line animated test
+asset and CC0 pack sources (Kenney, Quaternius).
+
 ## Tech notes
 
-- **Web bundle is ~150 KB gzipped** including Three.js. All models are
-  procedural primitives sold by lighting: moonlight + per-soldier flashlights,
-  bloom, fog, film grain, glowing visors and bug abdomens.
+- **Web bundle is ~150 KB gzipped** including Three.js (drop-in GLBs add
+  their own size). The procedural look leans on lighting: moonlight +
+  per-soldier flashlights, bloom, fog, film grain, glowing visors and bug
+  abdomens.
 - Netcode v1: client-authoritative movement with server speed/collision
   validation (PvE — responsiveness over cheat-proofing), server-authoritative
   everything else. Snapshot interpolation 120 ms; JSON protocol (upgrade path:

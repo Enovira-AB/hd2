@@ -9,8 +9,10 @@ import { Effects } from './effects.js';
 import { Sfx } from './sfx.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
+import { preloadModels } from './models.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
+preloadModels(); // optional drop-in GLBs; procedural fallback otherwise
 const hud = new Hud();
 const sfx = new Sfx();
 const world = new World3D(canvas, IS_TOUCH);
