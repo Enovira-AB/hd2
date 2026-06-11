@@ -1,5 +1,7 @@
 // Procedural helldiver model built from primitives. Reads well at night:
 // glowing visor, yellow accent stripes, team-colored cape, chest flashlight.
+// Iterated against scripts/preview.mts renders — keep proportions verified
+// there when changing anything.
 
 import * as THREE from 'three';
 
@@ -26,9 +28,15 @@ function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
   return mesh;
 }
 
+function cyl(r: number, h: number, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 8), mat);
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+
 export function buildSoldier(colorIndex: number, castShadow: boolean): SoldierRig {
   const armor = new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.55, metalness: 0.35 });
-  const armorLight = new THREE.MeshStandardMaterial({ color: 0x596169, roughness: 0.5, metalness: 0.4 });
+  const armorLight = new THREE.MeshStandardMaterial({ color: 0x5d656e, roughness: 0.5, metalness: 0.4 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.8, metalness: 0.2 });
   const stripe = new THREE.MeshStandardMaterial({
     color: 0xd9a834, emissive: 0xd9a834, emissiveIntensity: 0.3, roughness: 0.5,
@@ -43,72 +51,118 @@ export function buildSoldier(colorIndex: number, castShadow: boolean): SoldierRi
 
   const group = new THREE.Group();
 
-  // legs pivot at the hip
+  // legs: thigh + knee pad + shin + guard + boot, pivot at the hip
   const makeLeg = (side: number) => {
     const leg = new THREE.Group();
     leg.position.set(0.13 * side, 0.98, 0);
-    const thigh = box(0.17, 0.5, 0.2, armor, 0, -0.25, 0);
-    const shin = box(0.15, 0.48, 0.18, dark, 0, -0.7, 0.02);
-    const boot = box(0.17, 0.12, 0.28, dark, 0, -0.95, 0.05);
-    leg.add(thigh, shin, boot);
+    leg.add(
+      box(0.16, 0.42, 0.19, armor, 0, -0.22, 0),
+      box(0.13, 0.1, 0.12, armorLight, 0, -0.45, 0.05),
+      box(0.13, 0.42, 0.16, dark, 0, -0.69, 0),
+      box(0.1, 0.3, 0.05, armor, 0, -0.66, 0.09),
+      box(0.16, 0.11, 0.27, dark, 0, -0.925, 0.04),
+    );
     return leg;
   };
   const legL = makeLeg(-1);
   const legR = makeLeg(1);
   group.add(legL, legR);
 
-  const pelvis = box(0.4, 0.2, 0.27, dark, 0, 1.06, 0);
-  const torso = box(0.46, 0.52, 0.3, armor, 0, 1.42, 0);
-  const chest = box(0.48, 0.28, 0.34, armorLight, 0, 1.52, 0.01);
-  const chestStripe = box(0.49, 0.05, 0.35, stripe, 0, 1.44, 0.015);
-  const backpack = box(0.36, 0.44, 0.18, dark, 0, 1.45, -0.26);
-  const packLamp = box(0.05, 0.05, 0.02, new THREE.MeshStandardMaterial({
-    color: 0x111111, emissive: 0x9fffb0, emissiveIntensity: 1.6,
-  }), 0.1, 1.58, -0.36);
-  group.add(pelvis, torso, chest, chestStripe, backpack, packLamp);
+  // hips + belt with pouches
+  group.add(
+    box(0.36, 0.16, 0.24, armor, 0, 1.06, 0),
+    box(0.4, 0.09, 0.28, dark, 0, 1.17, 0),
+    box(0.09, 0.1, 0.06, dark, -0.12, 1.14, 0.16),
+    box(0.09, 0.1, 0.06, dark, 0.12, 1.14, 0.16),
+  );
+  for (const side of [-1, 1]) {
+    const hipPlate = box(0.12, 0.2, 0.2, armorLight, 0.21 * side, 1.04, 0);
+    hipPlate.rotation.z = -0.18 * side;
+    group.add(hipPlate);
+  }
 
-  const shoulderL = box(0.18, 0.14, 0.22, armorLight, -0.33, 1.65, 0);
-  const shoulderR = box(0.18, 0.14, 0.22, armorLight, 0.33, 1.65, 0);
-  const shStripeL = box(0.19, 0.04, 0.23, stripe, -0.33, 1.6, 0);
-  const shStripeR = box(0.19, 0.04, 0.23, stripe, 0.33, 1.6, 0);
-  group.add(shoulderL, shoulderR, shStripeL, shStripeR);
+  // torso: under-suit + chest plate + abdomen plate + back plate + stripe
+  group.add(
+    box(0.4, 0.5, 0.24, dark, 0, 1.42, 0),
+    box(0.44, 0.3, 0.3, armorLight, 0, 1.53, 0.01),
+    box(0.38, 0.17, 0.27, armor, 0, 1.31, 0.01),
+    box(0.42, 0.34, 0.12, armor, 0, 1.5, -0.14),
+    box(0.45, 0.05, 0.31, stripe, 0, 1.445, 0.015),
+  );
 
-  // helmet + visor
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), armorLight);
-  helmet.position.set(0, 1.84, 0);
-  helmet.scale.set(1, 1.08, 1.05);
-  const visor = box(0.17, 0.06, 0.03, visorMat, 0, 1.85, 0.145);
-  group.add(helmet, visor);
+  // backpack: pack + scrubber + antenna + status lamp
+  group.add(
+    box(0.34, 0.42, 0.16, dark, 0, 1.45, -0.26),
+    cyl(0.07, 0.2, armor, 0.1, 1.69, -0.26),
+    cyl(0.008, 0.36, dark, -0.12, 1.82, -0.28),
+    box(0.05, 0.05, 0.02, new THREE.MeshStandardMaterial({
+      color: 0x111111, emissive: 0x9fffb0, emissiveIntensity: 1.6,
+    }), 0.1, 1.56, -0.355),
+  );
+
+  // pauldrons, two layers each, with stripes
+  for (const side of [-1, 1]) {
+    const top = box(0.2, 0.12, 0.24, armorLight, 0.31 * side, 1.66, 0);
+    top.rotation.z = -0.14 * side;
+    const low = box(0.17, 0.1, 0.21, armor, 0.36 * side, 1.57, 0);
+    low.rotation.z = -0.3 * side;
+    const st = box(0.21, 0.035, 0.25, stripe, 0.31 * side, 1.62, 0);
+    st.rotation.z = -0.14 * side;
+    group.add(top, low, st);
+  }
+
+  // head: neck, helmet, jaw guard, visor slit, comm antenna
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 10), armorLight);
+  helmet.position.set(0, 1.8, 0);
+  helmet.scale.set(1, 1.06, 1.12);
+  const jaw = box(0.17, 0.1, 0.15, armor, 0, 1.72, 0.03);
+  const visor = box(0.15, 0.045, 0.02, visorMat, 0, 1.81, 0.125);
+  group.add(cyl(0.05, 0.09, dark, 0, 1.69, 0), helmet, jaw, visor, cyl(0.008, 0.12, dark, -0.13, 1.84, -0.01));
 
   // arms + rifle pivot together for aim pitch
   const arms = new THREE.Group();
-  arms.position.set(0, 1.62, 0.05);
-  const armR = box(0.11, 0.11, 0.42, armor, 0.27, -0.06, 0.2);
-  const armL = box(0.11, 0.11, 0.38, armor, -0.18, -0.13, 0.26);
-  armL.rotation.y = 0.5;
+  arms.position.set(0, 1.6, 0.05);
+  const upperR = box(0.1, 0.1, 0.3, armor, 0.3, -0.05, 0.16);
+  const foreR = box(0.09, 0.09, 0.3, armor, 0.27, -0.13, 0.36);
+  foreR.rotation.y = 0.12;
+  const handR = box(0.07, 0.09, 0.1, dark, 0.245, -0.16, 0.5);
+  const upperL = box(0.1, 0.1, 0.26, armor, -0.27, -0.06, 0.14);
+  upperL.rotation.y = 0.45;
+  const foreL = box(0.08, 0.08, 0.3, armor, -0.1, -0.15, 0.34);
+  foreL.rotation.y = 0.65;
+  const handL = box(0.07, 0.08, 0.09, dark, 0.08, -0.16, 0.46);
+
   const rifle = new THREE.Group();
-  const receiver = box(0.07, 0.13, 0.52, gunMat, 0, 0, 0);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.34, 8), gunMat);
+  const mag = box(0.045, 0.16, 0.08, gunMat, 0, -0.12, 0.05);
+  mag.rotation.x = 0.18;
+  rifle.add(
+    box(0.06, 0.11, 0.46, gunMat, 0, 0, 0),
+    box(0.05, 0.1, 0.18, dark, 0, -0.01, -0.3),
+    box(0.04, 0.09, 0.05, dark, 0, -0.1, -0.16),
+    mag,
+    box(0.05, 0.05, 0.07, gunMat, 0, 0.025, 0.52),
+  );
+  const barrel = cyl(0.022, 0.3, gunMat, 0, 0.025, 0.36);
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.03, 0.4);
-  const mag = box(0.05, 0.18, 0.09, gunMat, 0, -0.13, 0.08);
-  const stock = box(0.06, 0.11, 0.16, dark, 0, -0.02, -0.3);
-  const sight = box(0.02, 0.02, 0.02, new THREE.MeshStandardMaterial({
+  const scope = cyl(0.03, 0.1, dark, 0, 0.095, 0.0);
+  scope.rotation.x = Math.PI / 2;
+  const sight = box(0.018, 0.018, 0.018, new THREE.MeshStandardMaterial({
     color: 0x111111, emissive: 0xff4444, emissiveIntensity: 1.8,
-  }), 0, 0.085, 0.12);
+  }), 0, 0.1, -0.06);
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.03, 0.6);
-  rifle.add(receiver, barrel, mag, stock, sight, muzzle);
-  rifle.position.set(0.22, -0.1, 0.42);
-  arms.add(armR, armL, rifle);
+  muzzle.position.set(0, 0.025, 0.56);
+  rifle.add(barrel, scope, sight, muzzle);
+  rifle.position.set(0.24, -0.12, 0.3);
+  rifle.userData.baseZ = 0.3;
+  arms.add(upperR, foreR, handR, upperL, foreL, handL, rifle);
   group.add(arms);
 
   // cape, pivot at the shoulders
-  const capeGeo = new THREE.PlaneGeometry(0.52, 0.85, 1, 4);
+  const capeGeo = new THREE.PlaneGeometry(0.55, 0.85, 1, 5);
   capeGeo.translate(0, -0.42, 0);
   const cape = new THREE.Mesh(capeGeo, capeMat);
-  cape.position.set(0, 1.66, -0.33);
-  cape.rotation.x = 0.14;
+  cape.position.set(0, 1.64, -0.31);
+  cape.rotation.x = 0.16;
   group.add(cape);
 
   // chest flashlight (no shadows: cost)
@@ -151,7 +205,8 @@ export function animateSoldier(rig: SoldierRig, dt: number, s: SoldierAnimState)
   const targetPitch = s.reloading ? 0.7 : -s.pitch * 0.85;
   rig.arms.rotation.x += (targetPitch - rig.arms.rotation.x) * Math.min(1, dt * 14);
   rig.recoil = Math.max(0, rig.recoil - dt * 9);
-  rig.rifle.position.z = 0.42 - rig.recoil * 0.07;
+  const baseZ = (rig.rifle.userData.baseZ as number) ?? 0.3;
+  rig.rifle.position.z = baseZ - rig.recoil * 0.07;
 
   // cape sway
   rig.cape.rotation.x = 0.13 + speedF * 0.38 + Math.sin(s.time * 2.3 + rig.phase * 0.3) * 0.045;
