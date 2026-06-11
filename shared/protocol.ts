@@ -1,0 +1,116 @@
+// Wire protocol: JSON messages discriminated by `type`.
+// This file is the single source of truth; the Swift client mirrors it in
+// ios/Sources/Protocol.swift. v1 favors debuggability over bandwidth — the
+// upgrade path is MessagePack/binary snapshots behind the same shapes.
+
+export type Vec3 = [number, number, number];
+
+export const ANIM = {
+  MOVING: 1,
+  SPRINT: 2,
+  FIRING: 4,
+  RELOADING: 8,
+  DEAD: 16,
+  STRAT: 32, // punching in a stratagem code
+} as const;
+
+export interface PlayerState {
+  id: string;
+  name: string;
+  pos: Vec3;
+  yaw: number;
+  pitch: number;
+  anim: number;
+  hp: number;
+  ammo: number;
+  reserve: number;
+  kills: number;
+  boarded: boolean;
+}
+
+export interface BugState {
+  id: number;
+  kind: number; // index into BUG_KINDS
+  pos: Vec3;
+  yaw: number;
+  hp: number;
+}
+
+export interface SupplyState {
+  id: number;
+  pos: Vec3;
+  charges: number;
+}
+
+export type MissionPhase =
+  | 'LOBBY'
+  | 'DROP'
+  | 'KILL'
+  | 'EXTRACT'
+  | 'DEFEND'
+  | 'BOARD'
+  | 'COMPLETE'
+  | 'FAILED';
+
+export interface MissionState {
+  phase: MissionPhase;
+  seed: number;
+  kills: number;
+  killTarget: number;
+  reinforceLeft: number;
+  // server clock (ms) when the current phase auto-advances; 0 if not timed
+  phaseEndsAt: number;
+}
+
+export type ClientMsg =
+  | { type: 'join'; v: number; name: string; room?: string }
+  | { type: 'start' }
+  | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
+  | { type: 'fire'; origin: Vec3; dir: Vec3 }
+  | { type: 'reload' }
+  | { type: 'stratagem'; kind: string; target: Vec3 }
+  | { type: 'interact' }
+  | { type: 'ping'; t: number };
+
+export type HitKind = 'bug' | 'player' | 'rock' | 'none';
+
+export type ServerMsg =
+  | {
+      type: 'welcome';
+      self: string;
+      room: string;
+      host: string;
+      mission: MissionState;
+      players: PlayerState[];
+    }
+  | { type: 'error'; reason: string }
+  | { type: 'joined'; player: PlayerState }
+  | { type: 'left'; id: string; host: string }
+  | {
+      type: 'snapshot';
+      t: number; // server clock ms
+      players: PlayerState[];
+      bugs: BugState[];
+      supplies: SupplyState[];
+      mission: MissionState;
+    }
+  | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
+  | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
+  | { type: 'hit'; id: string; hp: number } // a player took damage
+  | { type: 'down'; id: string }
+  | { type: 'strat'; id: string; kind: string; target: Vec3; at: number } // impact at server time
+  | { type: 'boom'; kind: string; pos: Vec3 } // ORBITAL | RESUPPLY | REINFORCE | SHUTTLE
+  | { type: 'reinforced'; ids: string[]; pos: Vec3 }
+  | { type: 'phase'; mission: MissionState }
+  | { type: 'boarded'; id: string }
+  | { type: 'pong'; t: number; now: number };
+
+export function parseClientMsg(raw: string): ClientMsg | null {
+  try {
+    const msg = JSON.parse(raw);
+    if (typeof msg !== 'object' || msg === null || typeof msg.type !== 'string') return null;
+    return msg as ClientMsg;
+  } catch {
+    return null;
+  }
+}
