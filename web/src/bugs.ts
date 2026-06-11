@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { BUG_KINDS } from '../../shared/constants.js';
+import { makeGlowSprite } from './textures.js';
 
 export interface BugRig {
   group: THREE.Group;
@@ -95,6 +96,12 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
   shell.scale.set(1.0, 0.62, 1.12);
   shell.position.set(0, 0.52, -0.56);
   group.add(core, shell);
+
+  // halo so the glow reads at distance through fog and bloom; bigger than the
+  // abdomen so the ring shows around the occluding shell
+  const halo = makeGlowSprite(isWarrior ? 0xff4a16 : 0xff7a26, 1.7, 0.5);
+  halo.position.set(0, 0.38, -0.68);
+  group.add(halo);
 
   if (isWarrior) {
     const crest = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.42, 5), boneMat);

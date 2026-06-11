@@ -10,6 +10,37 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { generateLayout, terrainHeight, mulberry32, type WorldLayout } from '../../shared/world.js';
 import { MAP_HALF } from '../../shared/constants.js';
+import { makeGlowSprite, softCircleTexture, terrainSpeckleTexture } from './textures.js';
+
+// custom sky: vertical gradient, horizon glow band and slow aurora curtains
+const SkyShader = {
+  uniforms: { uTime: { value: 0 } },
+  vertexShader: /* glsl */ `
+    varying vec3 vDir;
+    void main() {
+      vDir = normalize(position);
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform float uTime;
+    varying vec3 vDir;
+    void main() {
+      vec3 dir = normalize(vDir);
+      float h = max(dir.y, 0.0);
+      vec3 zenith = vec3(0.010, 0.014, 0.028);
+      vec3 horizon = vec3(0.045, 0.068, 0.110);
+      vec3 col = mix(horizon, zenith, pow(h, 0.55));
+      // cold glow hugging the horizon
+      float band = exp(-pow((dir.y - 0.02) * 9.0, 2.0));
+      col += vec3(0.045, 0.085, 0.105) * band;
+      // slow aurora curtains high in the sky
+      float a = sin(dir.x * 5.0 + uTime * 0.05) * sin(dir.z * 3.5 - uTime * 0.037);
+      float curtains = smoothstep(0.18, 0.75, dir.y) * max(a, 0.0);
+      col += vec3(0.010, 0.135, 0.085) * curtains * 0.5;
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+};
 
 const FilmGradeShader = {
   uniforms: {
@@ -54,10 +85,14 @@ export class World3D {
   private moon: THREE.DirectionalLight;
   private worldGroup = new THREE.Group();
   private dust!: THREE.Points;
+  private mist: THREE.Sprite[] = [];
+  private skyMat!: THREE.ShaderMaterial;
   private nestGlows: THREE.Mesh[] = [];
+  private nestHalos: THREE.Sprite[] = [];
   private padRing!: THREE.Mesh;
   private padPillar!: THREE.Mesh;
   private padLight!: THREE.PointLight;
+  private padHalo!: THREE.Sprite;
   private padMode: 'off' | 'on' | 'blink' = 'off';
 
   constructor(canvas: HTMLCanvasElement, mobile: boolean) {
@@ -129,6 +164,18 @@ export class World3D {
   // ---- sky -------------------------------------------------------------------
 
   private buildSky() {
+    this.skyMat = new THREE.ShaderMaterial({
+      ...SkyShader,
+      uniforms: { uTime: { value: 0 } },
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+    });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(840, 32, 18), this.skyMat);
+    dome.renderOrder = -1;
+    dome.frustumCulled = false;
+    this.scene.add(dome);
+
     const rng = mulberry32(77);
     const starPos: number[] = [];
     const starCount = this.mobile ? 900 : 1600;
@@ -211,11 +258,22 @@ export class World3D {
     this.dust = new THREE.Points(
       geo,
       new THREE.PointsMaterial({
-        color: 0x8fa8cc, size: 0.07, transparent: true, opacity: 0.45,
+        map: softCircleTexture(),
+        color: 0x8fa8cc, size: 0.09, transparent: true, opacity: 0.45,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }),
     );
     this.scene.add(this.dust);
+
+    // rolling ground mist: a handful of huge faint sprites drifting low
+    const mistRng = mulberry32(31);
+    for (let i = 0; i < (this.mobile ? 5 : 9); i++) {
+      const s = makeGlowSprite(0x36465e, 16 + mistRng() * 18, 0.05);
+      s.position.set((mistRng() - 0.5) * 70, 0.8 + mistRng() * 1.6, (mistRng() - 0.5) * 70);
+      s.userData.drift = [(mistRng() - 0.5) * 0.4, (mistRng() - 0.5) * 0.4];
+      this.mist.push(s);
+      this.scene.add(s);
+    }
   }
 
   // ---- world from seed ---------------------------------------------------------
@@ -225,6 +283,7 @@ export class World3D {
     this.layout = generateLayout(seed);
     this.worldGroup.clear();
     this.nestGlows = [];
+    this.nestHalos = [];
 
     // terrain with vertex-color variation and slope shading
     const segs = this.mobile ? 96 : 128;
@@ -249,9 +308,13 @@ export class World3D {
     }
     geo.computeVertexNormals();
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const speckle = terrainSpeckleTexture();
+    speckle.repeat.set(70, 70);
     const terrain = new THREE.Mesh(
       geo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.02 }),
+      new THREE.MeshStandardMaterial({
+        vertexColors: true, map: speckle, roughness: 0.96, metalness: 0.02,
+      }),
     );
     terrain.receiveShadow = !this.mobile;
     this.worldGroup.add(terrain);
@@ -291,6 +354,10 @@ export class World3D {
       mound.scale.y = 0.55;
       this.worldGroup.add(mound);
       this.nestGlows.push(mound);
+      const halo = makeGlowSprite(0xff5a1f, 7, 0.35);
+      halo.position.set(nest.x, y + 1.4, nest.z);
+      this.worldGroup.add(halo);
+      this.nestHalos.push(halo);
       if (!this.mobile) {
         const l = new THREE.PointLight(0xff5a1f, 26, 17, 2);
         l.position.set(nest.x, y + 1.6, nest.z);
@@ -354,6 +421,10 @@ export class World3D {
     this.padLight.position.set(pad.x, padY + 3, pad.z);
     this.worldGroup.add(this.padLight);
 
+    this.padHalo = makeGlowSprite(0xffd94a, 9, 0);
+    this.padHalo.position.set(pad.x, padY + 2.2, pad.z);
+    this.worldGroup.add(this.padHalo);
+
     // console terminal by the pad
     const term = new THREE.Group();
     const stand = new THREE.Mesh(
@@ -395,27 +466,47 @@ export class World3D {
     this.dust.position.set(focus.x, 0, focus.z);
     this.dust.rotation.y = time * 0.004;
 
+    this.skyMat.uniforms.uTime.value = time;
+
+    // mist drifts slowly and stays loosely centered on the player
+    for (const m of this.mist) {
+      const [dx, dz] = m.userData.drift as [number, number];
+      m.position.x += dx * dt;
+      m.position.z += dz * dt;
+      if (Math.hypot(m.position.x - focus.x, m.position.z - focus.z) > 55) {
+        m.position.x = focus.x + (focus.x > m.position.x ? 45 : -45);
+        m.position.z = focus.z + (Math.random() - 0.5) * 70;
+      }
+    }
+
     for (let i = 0; i < this.nestGlows.length; i++) {
       const mat = this.nestGlows[i].material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.45 + Math.sin(time * 2.1 + i * 1.7) * 0.2;
+      const pulse = Math.sin(time * 2.1 + i * 1.7);
+      mat.emissiveIntensity = 0.45 + pulse * 0.2;
+      const halo = this.nestHalos[i];
+      if (halo) (halo.material as THREE.SpriteMaterial).opacity = 0.3 + pulse * 0.1;
     }
 
     if (this.padRing) {
       const ringMat = this.padRing.material as THREE.MeshStandardMaterial;
       const pillarMat = this.padPillar.material as THREE.MeshBasicMaterial;
+      const haloMat = this.padHalo.material as THREE.SpriteMaterial;
       if (this.padMode === 'off') {
         ringMat.emissiveIntensity = 0;
         pillarMat.opacity = 0;
         this.padLight.intensity = 0;
+        haloMat.opacity = 0;
       } else if (this.padMode === 'on') {
         ringMat.emissiveIntensity = 1.6;
         pillarMat.opacity = 0.075;
         this.padLight.intensity = 40;
+        haloMat.opacity = 0.4;
       } else {
         const blink = Math.sin(time * 6) > 0 ? 1 : 0.15;
         ringMat.emissiveIntensity = 1.8 * blink;
         pillarMat.opacity = 0.085 * blink;
         this.padLight.intensity = 48 * blink;
+        haloMat.opacity = 0.45 * blink;
       }
     }
 

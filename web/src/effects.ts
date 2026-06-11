@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { buildBug } from './bugs.js';
+import { makeGlowSprite, smokeTexture, softCircleTexture } from './textures.js';
 
 interface Tracer {
   mesh: THREE.Mesh;
@@ -60,6 +61,8 @@ export class Effects {
   private shuttleTo = new THREE.Vector3();
   private shuttleT = 0;
 
+  private flashSprites: THREE.Sprite[] = [];
+
   constructor(scene: THREE.Scene, mobile: boolean) {
     this.scene = scene;
     this.mobile = mobile;
@@ -67,6 +70,9 @@ export class Effects {
       const l = new THREE.PointLight(0xffc46b, 0, 14, 2);
       this.flashPool.push(l);
       scene.add(l);
+      const s = makeGlowSprite(0xffd9a0, 1.1, 0);
+      this.flashSprites.push(s);
+      scene.add(s);
     }
   }
 
@@ -106,11 +112,17 @@ export class Effects {
   }
 
   muzzleFlash(pos: THREE.Vector3) {
-    const light = this.flashPool.find((l) => l.intensity <= 0.5);
-    if (light) {
-      light.position.copy(pos);
-      light.intensity = 170;
-    }
+    const i = this.flashPool.findIndex((l) => l.intensity <= 0.5);
+    if (i === -1) return;
+    this.flashPool[i].position.copy(pos);
+    this.flashPool[i].intensity = 170;
+    const sprite = this.flashSprites[i];
+    sprite.position.copy(pos);
+    const mat = sprite.material as THREE.SpriteMaterial;
+    mat.opacity = 0.9;
+    mat.rotation = Math.random() * Math.PI * 2;
+    const sc = 0.8 + Math.random() * 0.5;
+    sprite.scale.set(sc, sc, 1);
   }
 
   impact(pos: THREE.Vector3, kind: 'rock' | 'bug' | 'player' | 'none') {
@@ -126,6 +138,7 @@ export class Effects {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(26 * 3), 3));
       const points = new THREE.Points(geo, new THREE.PointsMaterial({
+        map: softCircleTexture(),
         size: 0.09, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       b = { points, vel: new Float32Array(26 * 3), ttl: 0.5, age: 0, alive: false };
@@ -203,29 +216,46 @@ export class Effects {
       },
     });
 
-    // ember smoke
-    const smokeN = this.mobile ? 5 : 9;
+    // glow flash sprite over the fireball
+    const glow = makeGlowSprite(0xffb36b, radius * 2.6, 0.95);
+    glow.position.copy(pos).add(new THREE.Vector3(0, 1.2, 0));
+    this.scene.add(glow);
+    this.timed.push({
+      obj: glow, age: 0, ttl: 0.45,
+      tick: (t) => {
+        (glow.material as THREE.SpriteMaterial).opacity = 0.95 * (1 - t);
+        const s = radius * (2.6 + t * 1.4);
+        glow.scale.set(s, s, 1);
+      },
+    });
+
+    // rolling smoke sprites: ember-lit at first, cooling to dark
+    const warm = new THREE.Color(0x9a5a30);
+    const cold = new THREE.Color(0x232a33);
+    const smokeN = this.mobile ? 6 : 10;
     for (let i = 0; i < smokeN; i++) {
-      const puff = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.7 + Math.random() * 0.7, 0),
-        new THREE.MeshStandardMaterial({
-          color: 0x17191d, roughness: 1, transparent: true, opacity: 0.85,
-          emissive: 0xff5a1f, emissiveIntensity: 0.5,
-        }),
-      );
+      const mat = new THREE.SpriteMaterial({
+        map: smokeTexture(), transparent: true, opacity: 0.6,
+        depthWrite: false, rotation: Math.random() * Math.PI * 2,
+      });
+      const puff = new THREE.Sprite(mat);
       const a = Math.random() * Math.PI * 2;
       const r = Math.random() * radius * 0.5;
-      puff.position.copy(pos).add(new THREE.Vector3(Math.cos(a) * r, 0.5, Math.sin(a) * r));
-      const rise = 1.5 + Math.random() * 2;
+      puff.position.copy(pos).add(new THREE.Vector3(Math.cos(a) * r, 0.6 + Math.random(), Math.sin(a) * r));
+      const sc0 = 1.2 + Math.random() * 1.4;
+      puff.scale.set(sc0, sc0, 1);
+      const rise = 1.4 + Math.random() * 2;
+      const spin = (Math.random() - 0.5) * 0.9;
       this.scene.add(puff);
       this.timed.push({
-        obj: puff, age: 0, ttl: 1.8 + Math.random(),
+        obj: puff, age: 0, ttl: 1.9 + Math.random(),
         tick: (t) => {
           puff.position.y += rise * 0.016;
-          puff.scale.setScalar(1 + t * 1.6);
-          const m = puff.material as THREE.MeshStandardMaterial;
-          m.opacity = 0.85 * (1 - t);
-          m.emissiveIntensity = 0.5 * Math.max(0, 1 - t * 2.5);
+          const s = sc0 * (1 + t * 2.2);
+          puff.scale.set(s, s, 1);
+          mat.rotation += spin * 0.016;
+          mat.opacity = 0.6 * (1 - t);
+          mat.color.copy(warm).lerp(cold, Math.min(1, t * 2.2));
         },
       });
     }
@@ -288,7 +318,9 @@ export class Effects {
       }),
     );
     pillar.position.y = 30;
-    g.add(ball, stem, pillar);
+    const halo = makeGlowSprite(color, 1.8, 0.5);
+    halo.position.y = 0.35;
+    g.add(ball, stem, pillar, halo);
     g.position.copy(pos);
     g.userData.ball = ball;
     this.scene.add(g);
@@ -379,6 +411,9 @@ export class Effects {
       engine.position.set(2.6 * side, 1.7, -2.6);
       engine.name = 'engine';
       g.add(engine);
+      const engineGlow = makeGlowSprite(0x9fd0ff, 2.6, 0.55);
+      engineGlow.position.set(2.6 * side, 1.7, -2.6);
+      g.add(engineGlow);
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.25), wingMat);
       leg.position.set(1.6 * side, 0.4, 0);
       g.add(leg);
@@ -440,8 +475,11 @@ export class Effects {
   update(dt: number, time: number) {
     this.trauma = Math.max(0, this.trauma - dt * 1.4);
 
-    for (const l of this.flashPool) {
+    for (let i = 0; i < this.flashPool.length; i++) {
+      const l = this.flashPool[i];
       if (l.intensity > 0) l.intensity = Math.max(0, l.intensity - dt * 2600);
+      const mat = this.flashSprites[i].material as THREE.SpriteMaterial;
+      if (mat.opacity > 0) mat.opacity = Math.max(0, mat.opacity - dt * 16);
     }
 
     for (const t of this.tracers) {

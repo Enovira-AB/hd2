@@ -66,6 +66,34 @@ interface Tri {
   ei: number;
 }
 
+interface Splat {
+  pos: THREE.Vector3;
+  scale: number;
+  color: THREE.Color;
+  opacity: number;
+}
+
+// additive glow sprites (bug halos, beacons …) rendered as soft splats
+function collectSprites(root: THREE.Object3D): Splat[] {
+  root.updateMatrixWorld(true);
+  const splats: Splat[] = [];
+  root.traverse((o) => {
+    const sprite = o as THREE.Sprite;
+    if (!(sprite as { isSprite?: boolean }).isSprite || !sprite.visible) return;
+    const mat = sprite.material as THREE.SpriteMaterial;
+    if ((mat.opacity ?? 1) <= 0.01) return;
+    const ws = new THREE.Vector3();
+    sprite.getWorldScale(ws);
+    splats.push({
+      pos: new THREE.Vector3().setFromMatrixPosition(sprite.matrixWorld),
+      scale: Math.abs(ws.x),
+      color: mat.color ?? new THREE.Color(1, 1, 1),
+      opacity: mat.opacity ?? 1,
+    });
+  });
+  return splats;
+}
+
 function collect(root: THREE.Object3D): Tri[] {
   root.updateMatrixWorld(true);
   const tris: Tri[] = [];
@@ -241,6 +269,34 @@ function render(root: THREE.Object3D, shot: Shot) {
       }
     }
   }
+  // splat additive sprites with depth test against the z-buffer
+  const fovScale = (H / 2) / Math.tan(((shot.fov ?? 38) * Math.PI) / 360);
+  for (const s of collectSprites(root)) {
+    const p = new THREE.Vector4(s.pos.x, s.pos.y, s.pos.z, 1).applyMatrix4(view).applyMatrix4(proj);
+    if (p.w <= 0) continue;
+    const sx = ((p.x / p.w) * 0.5 + 0.5) * W;
+    const sy = (1 - ((p.y / p.w) * 0.5 + 0.5)) * H;
+    const r = ((s.scale * 0.5) * fovScale) / p.w;
+    if (r < 0.5 || r > W) continue;
+    const minX = Math.max(0, Math.floor(sx - r));
+    const maxX = Math.min(W - 1, Math.ceil(sx + r));
+    const minY = Math.max(0, Math.floor(sy - r));
+    const maxY = Math.min(H - 1, Math.ceil(sy + r));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const idx = y * W + x;
+        if (p.w > zbuf[idx]) continue; // occluded by geometry
+        const d = Math.hypot(x - sx, y - sy) / r;
+        if (d >= 1) continue;
+        const fall = Math.pow(1 - d, 1.6) * s.opacity;
+        const i = idx * 4;
+        px[i] = Math.min(255, px[i] + s.color.r * fall * 255);
+        px[i + 1] = Math.min(255, px[i + 1] + s.color.g * fall * 255);
+        px[i + 2] = Math.min(255, px[i + 2] + s.color.b * fall * 255);
+      }
+    }
+  }
+
   writePng(shot.out, px);
 }
 
@@ -275,8 +331,10 @@ mkdirSync('/tmp/preview', { recursive: true });
 {
   // night beauty shot: soldier + bugs on a ground plane, torch + fog + ACES
   const scene = new THREE.Group();
+  // subdivided so triangles behind the camera can be dropped per-cell
+  // (this simple rasterizer skips any triangle with a vertex behind the eye)
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 40, 1, 1).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(40, 40, 16, 16).rotateX(-Math.PI / 2),
     new THREE.MeshStandardMaterial({ color: 0x2e3338 }),
   );
   scene.add(ground);
