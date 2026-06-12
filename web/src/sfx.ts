@@ -1,0 +1,142 @@
+// Procedural sound: no audio assets, everything synthesized in WebAudio.
+// iOS Safari requires creation inside a user gesture — call ensure() from
+// the first touch/click/keydown.
+
+export class Sfx {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private lastFire = 0;
+  private lastScreech = 0;
+
+  ensure() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      return;
+    }
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    this.ctx = new Ctx();
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.ratio.value = 8;
+    comp.connect(this.ctx.destination);
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.55;
+    this.master.connect(comp);
+
+    const len = this.ctx.sampleRate * 2;
+    this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = this.noise.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+
+    this.startWind();
+  }
+
+  private env(gain: GainNode, t0: number, peak: number, decay: number) {
+    gain.gain.setValueAtTime(peak, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + decay);
+  }
+
+  private playNoise(filterType: BiquadFilterType, freq0: number, freq1: number, peak: number, dur: number, when = 0) {
+    if (!this.ctx || !this.master || !this.noise) return;
+    const t0 = this.ctx.currentTime + when;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 0.85 + Math.random() * 0.3;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(freq0, t0);
+    if (freq1 !== freq0) filter.frequency.exponentialRampToValueAtTime(freq1, t0 + dur);
+    const gain = this.ctx.createGain();
+    this.env(gain, t0, peak, dur);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start(t0, Math.random());
+    src.stop(t0 + dur + 0.05);
+  }
+
+  private playOsc(type: OscillatorType, f0: number, f1: number, peak: number, dur: number, when = 0) {
+    if (!this.ctx || !this.master) return;
+    const t0 = this.ctx.currentTime + when;
+    const osc = this.ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t0);
+    if (f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+    const gain = this.ctx.createGain();
+    this.env(gain, t0, peak, dur);
+    osc.connect(gain).connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+  }
+
+  fire(volume = 1) {
+    if (!this.ctx) return;
+    const now = performance.now();
+    if (now - this.lastFire < 35) return;
+    this.lastFire = now;
+    this.playNoise('lowpass', 3200, 700, 0.5 * volume, 0.09);
+    this.playOsc('square', 150, 55, 0.22 * volume, 0.05);
+  }
+
+  impact(volume = 1) {
+    this.playNoise('lowpass', 1300, 500, 0.16 * volume, 0.06);
+  }
+
+  explosion(volume = 1) {
+    this.playNoise('lowpass', 900, 110, 1.15 * volume, 1.25);
+    this.playOsc('sine', 52, 26, 0.9 * volume, 0.9);
+    this.playNoise('highpass', 2500, 2500, 0.2 * volume, 0.3);
+  }
+
+  reload() {
+    this.playOsc('square', 1900, 1900, 0.1, 0.015);
+    this.playOsc('square', 1300, 1300, 0.12, 0.02, 0.5);
+    this.playOsc('square', 2200, 2200, 0.12, 0.02, 1.6);
+  }
+
+  screech(volume = 1) {
+    if (!this.ctx) return;
+    const now = performance.now();
+    if (now - this.lastScreech < 160) return;
+    this.lastScreech = now;
+    this.playOsc('sawtooth', 1100 + Math.random() * 400, 240, 0.16 * volume, 0.3);
+    this.playNoise('bandpass', 1800, 600, 0.1 * volume, 0.25);
+  }
+
+  hurt() {
+    this.playNoise('lowpass', 700, 200, 0.4, 0.18);
+    this.playOsc('sine', 95, 60, 0.3, 0.18);
+  }
+
+  beep(ok = false) {
+    this.playOsc('square', ok ? 1318 : 980, ok ? 1318 : 980, 0.12, 0.07);
+  }
+
+  error() {
+    this.playOsc('square', 220, 180, 0.15, 0.18);
+  }
+
+  pod() {
+    this.playNoise('bandpass', 500, 90, 0.5, 0.9);
+  }
+
+  private startWind() {
+    if (!this.ctx || !this.master || !this.noise) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 220;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.05;
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.value = 0.13;
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = 0.025;
+    lfo.connect(lfoGain).connect(gain.gain);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start();
+    lfo.start();
+  }
+}

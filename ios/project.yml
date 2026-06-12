@@ -1,0 +1,28 @@
+# XcodeGen spec — run `xcodegen` in this directory to produce Helldive.xcodeproj
+# (brew install xcodegen)
+name: Helldive
+options:
+  bundleIdPrefix: com.yourname
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Helldive:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Info.plist
+      properties:
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        # Dev only: allows ws:// to a LAN server. For production use wss://
+        # (TLS) and remove this.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
