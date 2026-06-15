@@ -158,6 +158,25 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #strat-list { font-size: 10px; letter-spacing: 0.14em; opacity: 0.7; line-height: 1.8; margin-top: 6px; }
 #strat-list b { color: var(--yellow); font-weight: 400; }
 
+#boss-bar {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+  width: min(60vw, 560px); text-align: center;
+}
+#boss-name {
+  font-size: 13px; letter-spacing: 0.4em; color: var(--red);
+  text-shadow: 0 1px 3px #000; margin-bottom: 5px; font-weight: 700;
+}
+#boss-track {
+  height: 9px; background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 90, 72, 0.55);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+#boss-fill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #ff2a18, #ff7a48);
+  transition: width 0.18s ease-out;
+}
+
 #interact-prompt {
   position: absolute; left: 50%; bottom: 22%;
   transform: translateX(-50%);

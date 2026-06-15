@@ -377,6 +377,19 @@ mkdirSync('/tmp/preview', { recursive: true });
     camPos: [2.0, 1.4, 2.9], lookAt: [0, 0.55, 0], mode: 'studio',
   });
 }
+for (const [kind, name, cam] of [
+  [2, 'spitter', [1.5, 1.0, 2.1]],
+  [3, 'charger', [2.2, 1.4, 3.1]],
+  [4, 'titan', [7.5, 5.2, 10.5]],
+] as [number, string, [number, number, number]][]) {
+  const b = buildBug(kind, false);
+  b.group.rotation.y = 0.7;
+  const r = (kind === 4 ? 3.4 : kind === 3 ? 1.15 : 0.72) / 0.55;
+  render(b.group, {
+    out: `/tmp/preview/${name}.png`,
+    camPos: cam, lookAt: [0, 0.4 * r, 0], mode: 'studio',
+  });
+}
 {
   // night beauty shot: soldier + bugs on a ground plane, torch + fog + ACES
   const scene = new THREE.Group();

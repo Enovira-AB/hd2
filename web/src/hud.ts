@@ -99,6 +99,14 @@ export class Hud {
     }
   }
 
+  setBoss(boss: { hp: number; hpMax: number } | null) {
+    el('boss-bar').classList.toggle('hidden', !boss);
+    if (boss) {
+      const frac = Math.max(0, Math.min(1, boss.hp / Math.max(1, boss.hpMax)));
+      (el('boss-fill') as HTMLElement).style.width = `${frac * 100}%`;
+    }
+  }
+
   interactPrompt(text: string | null) {
     const p = el('interact-prompt');
     p.classList.toggle('hidden', !text);

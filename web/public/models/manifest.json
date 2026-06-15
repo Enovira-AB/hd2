@@ -1,6 +1,9 @@
 {
-  "_comment": "Drop-in GLB models. Add entries to use real assets instead of the procedural primitives. Keys: soldier, bug0 (scavenger), bug1 (warrior). Values are filenames in this folder. Empty = procedural look. See README.md.",
-  "soldier": null,
+  "_comment": "Drop-in GLB models replace the procedural ones. Value = filename, or { file, yaw, height }. yaw rotates a model that faces the wrong way (try 3.14159). Keys: soldier, bug0 scavenger, bug1 warrior, bug2 spitter, bug3 charger, bug4 titan. null = procedural. See README.md.",
+  "soldier": { "file": "soldier.glb", "yaw": 0 },
   "bug0": null,
-  "bug1": null
+  "bug1": null,
+  "bug2": null,
+  "bug3": null,
+  "bug4": null
 }

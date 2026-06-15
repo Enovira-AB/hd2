@@ -17,7 +17,7 @@ import {
 } from './models.js';
 import { ANIM, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
-  MISSION, ORBITAL_RADIUS, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
+  MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
   type StratagemKind,
 } from '../../shared/constants.js';
 import { resolveCollisions } from '../../shared/world.js';
@@ -196,6 +196,20 @@ export class Game {
       }
     });
 
+    n.on('splat', (m) => {
+      if (m.type !== 'splat') return;
+      const pos = new THREE.Vector3(...m.pos);
+      this.fx.acidSplat(pos, m.kind);
+      this.sfx.impact(Math.max(0.15, 1 - this.pos.distanceTo(pos) / 50));
+    });
+
+    n.on('boss', (m) => {
+      if (m.type !== 'boss') return;
+      this.hud.banner('⚠ BILE TITAN', 'A TERMINID BEHEMOTH APPROACHES', 3600);
+      this.fx.addShake(0.6);
+      this.sfx.screech(1);
+    });
+
     n.on('reinforced', (m) => {
       if (m.type !== 'reinforced') return;
       if (m.ids.includes(n.selfId)) {
@@ -318,6 +332,7 @@ export class Game {
     this.updateCombat();
     this.updateInteract();
     this.reconcileViews(dt, time);
+    this.updateProjectilesAndBoss();
     this.updateHud();
     this.sendState();
   }
@@ -683,6 +698,23 @@ export class Game {
         this.supplyViews.delete(id);
       }
     }
+  }
+
+  // Extrapolate acid globs from the last snapshot (they move fast for the
+  // 15Hz stream) and refresh the boss healthbar.
+  private updateProjectilesAndBoss() {
+    const dt = Math.max(0, (this.net.serverNow() - this.net.latestSnapT) / 1000);
+    const list = this.net.latestProjectiles.map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      pos: [
+        p.pos[0] + p.vel[0] * dt,
+        p.pos[1] + p.vel[1] * dt - 0.5 * PROJECTILE.gravity * dt * dt,
+        p.pos[2] + p.vel[2] * dt,
+      ] as [number, number, number],
+    }));
+    this.fx.syncProjectiles(list);
+    this.hud.setBoss(this.net.boss);
   }
 
   // ---- HUD + state -------------------------------------------------------------------

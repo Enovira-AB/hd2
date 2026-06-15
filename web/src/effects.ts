@@ -470,6 +470,63 @@ export class Effects {
     this.burst(pos, 18, 0x9aff66, 5, 0.6, 0.12);
   }
 
+  // ---- acid projectiles --------------------------------------------------------------
+
+  private globs = new Map<number, THREE.Mesh>();
+
+  // Reconcile the in-flight acid globs with the latest (extrapolated) set.
+  syncProjectiles(list: { id: number; kind: number; pos: [number, number, number] }[]) {
+    const seen = new Set<number>();
+    for (const p of list) {
+      seen.add(p.id);
+      let mesh = this.globs.get(p.id);
+      if (!mesh) {
+        const big = p.kind === 1;
+        mesh = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(big ? 0.34 : 0.2, 0),
+          new THREE.MeshStandardMaterial({
+            color: 0x4a6b1a, emissive: 0x9aff3a, emissiveIntensity: 1.4, roughness: 0.4, flatShading: true,
+          }),
+        );
+        mesh.add(makeGlowSprite(0x9aff3a, big ? 1.6 : 1.0, 0.6));
+        this.scene.add(mesh);
+        this.globs.set(p.id, mesh);
+      }
+      mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+      mesh.rotation.x += 0.3;
+      mesh.rotation.y += 0.2;
+    }
+    for (const [id, mesh] of this.globs) {
+      if (!seen.has(id)) {
+        this.scene.remove(mesh);
+        this.globs.delete(id);
+      }
+    }
+  }
+
+  acidSplat(pos: THREE.Vector3, kind: number) {
+    const big = kind === 1;
+    this.burst(pos, big ? 22 : 14, 0x9aff3a, big ? 6 : 4.5, 0.6, big ? 0.16 : 0.11);
+    const light = new THREE.PointLight(0x9aff3a, big ? 60 : 28, big ? 10 : 6, 2);
+    light.position.copy(pos).add(new THREE.Vector3(0, 0.4, 0));
+    this.scene.add(light);
+    this.timed.push({ obj: light, age: 0, ttl: 0.4, tick: (t) => { light.intensity = (big ? 60 : 28) * (1 - t); } });
+    // a lingering scorch decal on the ground
+    const decal = new THREE.Mesh(
+      new THREE.CircleGeometry(big ? 1.6 : 0.9, 12).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0x6aff2a, transparent: true, opacity: 0.4, depthWrite: false,
+        blending: THREE.AdditiveBlending, fog: false,
+      }),
+    );
+    decal.position.copy(pos).add(new THREE.Vector3(0, 0.06, 0));
+    this.scene.add(decal);
+    this.timed.push({
+      obj: decal, age: 0, ttl: 2.5,
+      tick: (t) => { (decal.material as THREE.MeshBasicMaterial).opacity = 0.4 * (1 - t); },
+    });
+  }
+
   // ---- update ------------------------------------------------------------------------
 
   update(dt: number, time: number) {

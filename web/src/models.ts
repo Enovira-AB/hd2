@@ -25,7 +25,7 @@ export interface ModelInstance {
 
 const registry: { soldier: LoadedModel | null; bugs: (LoadedModel | null)[] } = {
   soldier: null,
-  bugs: [null, null],
+  bugs: [null, null, null, null, null],
 };
 
 export function getSoldierModel(): LoadedModel | null {
@@ -36,13 +36,21 @@ export function getBugModel(kind: number): LoadedModel | null {
 }
 
 // Normalized display height per logical model, keyed by manifest field.
-const TARGET_HEIGHT: Record<string, number> = { soldier: 1.95, bug0: 0.95, bug1: 1.55 };
+const TARGET_HEIGHT: Record<string, number> = {
+  soldier: 1.95, bug0: 0.95, bug1: 1.55, bug2: 1.4, bug3: 2.4, bug4: 6.0,
+};
+
+// A manifest entry is a filename, or an object for tuning facing/height
+// without touching code: { "file": "x.glb", "yaw": 3.14159, "height": 2 }.
+// `yaw` rotates the model if it faces the wrong way (glTF forward is +Z; if a
+// model walks backwards, set yaw to Math.PI ≈ 3.14159).
+type ManifestEntry = string | { file: string; yaw?: number; height?: number } | null;
 
 // Fire-and-forget at boot. Reads /models/manifest.json (always shipped, so no
 // 404s) and only loads the GLBs it actually lists; anything unlisted keeps its
 // procedural look. Views created after a model resolves pick it up.
 export async function preloadModels() {
-  let manifest: Record<string, string | null> = {};
+  let manifest: Record<string, ManifestEntry> = {};
   try {
     const res = await fetch('/models/manifest.json');
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
@@ -51,24 +59,31 @@ export async function preloadModels() {
     return; // no manifest, no custom models — procedural everywhere
   }
   const load = (key: string, set: (m: LoadedModel) => void) => {
-    const file = manifest[key];
-    if (typeof file !== 'string' || file.length === 0) return;
-    void loadModel(`/models/${file}`, TARGET_HEIGHT[key] ?? 1.8).then((m) => {
+    const entry = manifest[key];
+    const file = typeof entry === 'string' ? entry : entry?.file;
+    if (!file) return;
+    const yaw = typeof entry === 'object' && entry ? entry.yaw ?? 0 : 0;
+    const height = (typeof entry === 'object' && entry ? entry.height : undefined) ?? TARGET_HEIGHT[key] ?? 1.8;
+    void loadModel(`/models/${file}`, height, yaw).then((m) => {
       if (m) set(m);
     });
   };
   load('soldier', (m) => (registry.soldier = m));
   load('bug0', (m) => (registry.bugs[0] = m));
   load('bug1', (m) => (registry.bugs[1] = m));
+  load('bug2', (m) => (registry.bugs[2] = m));
+  load('bug3', (m) => (registry.bugs[3] = m));
+  load('bug4', (m) => (registry.bugs[4] = m));
 }
 
-async function loadModel(url: string, targetHeight: number): Promise<LoadedModel | null> {
+async function loadModel(url: string, targetHeight: number, faceYaw: number): Promise<LoadedModel | null> {
   try {
     const gltf = await new GLTFLoader().loadAsync(url);
     const wrapper = new THREE.Group();
     wrapper.add(gltf.scene);
 
-    // normalize: scale to target height, feet on the ground
+    // normalize: scale to target height, feet on the ground, face +Z
+    gltf.scene.rotation.y += faceYaw;
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const size = box.getSize(new THREE.Vector3());
     const s = targetHeight / Math.max(0.01, size.y);
