@@ -1,0 +1,6 @@
+{
+  "_comment": "Drop-in GLB models. Add entries to use real assets instead of the procedural primitives. Keys: soldier, bug0 (scavenger), bug1 (warrior). Values are filenames in this folder. Empty = procedural look. See README.md.",
+  "soldier": null,
+  "bug0": null,
+  "bug1": null
+}

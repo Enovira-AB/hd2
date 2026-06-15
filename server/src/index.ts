@@ -23,7 +23,17 @@ const app = express();
 app.get('/healthz', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 if (fs.existsSync(webDist)) {
   app.use(express.static(webDist));
-  app.get('*', (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+  // SPA fallback for navigation routes only. A request for a path with a file
+  // extension (e.g. a missing .glb or .png) gets a real 404 instead of
+  // index.html — returning the HTML shell for assets masks errors and breaks
+  // parsers expecting binary/JSON.
+  app.get('*', (req, res) => {
+    if (path.extname(req.path)) {
+      res.status(404).end();
+    } else {
+      res.sendFile(path.join(webDist, 'index.html'));
+    }
+  });
 }
 
 const server = http.createServer(app);

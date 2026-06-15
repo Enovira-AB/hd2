@@ -1,7 +1,7 @@
-// Optional drop-in GLB models with skeletal animation. Put files in
-// web/public/models/ (see the README there) and they replace the procedural
-// primitives automatically — soldier.glb, bug0.glb, bug1.glb. No file, no
-// problem: every entity falls back to its procedural builder.
+// Optional drop-in GLB models with skeletal animation. List files in
+// web/public/models/manifest.json (see the README there) and they replace the
+// procedural primitives automatically. Nothing listed → every entity falls
+// back to its procedural builder, with zero failed network requests.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -35,22 +35,35 @@ export function getBugModel(kind: number): LoadedModel | null {
   return registry.bugs[kind] ?? null;
 }
 
-// Fire-and-forget at boot. Views created after a model resolves use it;
-// views created before keep their procedural look until the next mission.
-export function preloadModels() {
-  void loadOptional('/models/soldier.glb', 1.95).then((m) => (registry.soldier = m));
-  void loadOptional('/models/bug0.glb', 0.95).then((m) => (registry.bugs[0] = m));
-  void loadOptional('/models/bug1.glb', 1.55).then((m) => (registry.bugs[1] = m));
+// Normalized display height per logical model, keyed by manifest field.
+const TARGET_HEIGHT: Record<string, number> = { soldier: 1.95, bug0: 0.95, bug1: 1.55 };
+
+// Fire-and-forget at boot. Reads /models/manifest.json (always shipped, so no
+// 404s) and only loads the GLBs it actually lists; anything unlisted keeps its
+// procedural look. Views created after a model resolves pick it up.
+export async function preloadModels() {
+  let manifest: Record<string, string | null> = {};
+  try {
+    const res = await fetch('/models/manifest.json');
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
+    manifest = await res.json();
+  } catch {
+    return; // no manifest, no custom models — procedural everywhere
+  }
+  const load = (key: string, set: (m: LoadedModel) => void) => {
+    const file = manifest[key];
+    if (typeof file !== 'string' || file.length === 0) return;
+    void loadModel(`/models/${file}`, TARGET_HEIGHT[key] ?? 1.8).then((m) => {
+      if (m) set(m);
+    });
+  };
+  load('soldier', (m) => (registry.soldier = m));
+  load('bug0', (m) => (registry.bugs[0] = m));
+  load('bug1', (m) => (registry.bugs[1] = m));
 }
 
-async function loadOptional(url: string, targetHeight: number): Promise<LoadedModel | null> {
+async function loadModel(url: string, targetHeight: number): Promise<LoadedModel | null> {
   try {
-    // probe first: the prod server SPA-falls-back to index.html, so a bare
-    // GLTFLoader 404 would surface as a confusing JSON parse error
-    const head = await fetch(url, { method: 'HEAD' });
-    const type = head.headers.get('content-type') ?? '';
-    if (!head.ok || type.includes('text/html')) return null;
-
     const gltf = await new GLTFLoader().loadAsync(url);
     const wrapper = new THREE.Group();
     wrapper.add(gltf.scene);
