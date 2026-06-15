@@ -16,9 +16,11 @@ export interface ModelInstance {
   group: THREE.Group;
   mixer: THREE.AnimationMixer | null;
   actions: {
-    move?: THREE.AnimationAction;
+    move?: THREE.AnimationAction; // forward locomotion
     idle?: THREE.AnimationAction;
     death?: THREE.AnimationAction;
+    back?: THREE.AnimationAction; // moving backward
+    strafe?: THREE.AnimationAction; // lateral
   };
   current?: THREE.AnimationAction;
 }
@@ -40,11 +42,17 @@ const TARGET_HEIGHT: Record<string, number> = {
   soldier: 1.95, bug0: 0.95, bug1: 1.55, bug2: 1.4, bug3: 2.4, bug4: 6.0,
 };
 
-// A manifest entry is a filename, or an object for tuning facing/height
-// without touching code: { "file": "x.glb", "yaw": 3.14159, "height": 2 }.
+// A manifest entry is a filename, or an object for tuning facing/height and
+// adding extra animation clips without touching code:
+//   { "file": "x.glb", "yaw": 3.14159, "height": 2,
+//     "anims": { "back": "anims/run_back.glb", "strafe": "anims/strafe.glb" } }
 // `yaw` rotates the model if it faces the wrong way (glTF forward is +Z; if a
-// model walks backwards, set yaw to Math.PI ≈ 3.14159).
-type ManifestEntry = string | { file: string; yaw?: number; height?: number } | null;
+// model walks backwards, set yaw to Math.PI ≈ 3.14159). `anims` merges extra
+// skeletal clips (e.g. Mixamo directional anims) onto the same rig by name.
+type ManifestEntry =
+  | string
+  | { file: string; yaw?: number; height?: number; anims?: Record<string, string> }
+  | null;
 
 // Fire-and-forget at boot. Reads /models/manifest.json (always shipped, so no
 // 404s) and only loads the GLBs it actually lists; anything unlisted keeps its
@@ -62,9 +70,13 @@ export async function preloadModels() {
     const entry = manifest[key];
     const file = typeof entry === 'string' ? entry : entry?.file;
     if (!file) return;
-    const yaw = typeof entry === 'object' && entry ? entry.yaw ?? 0 : 0;
-    const height = (typeof entry === 'object' && entry ? entry.height : undefined) ?? TARGET_HEIGHT[key] ?? 1.8;
-    void loadModel(`/models/${file}`, height, yaw).then((m) => {
+    const obj = typeof entry === 'object' && entry ? entry : null;
+    const yaw = obj?.yaw ?? 0;
+    const height = obj?.height ?? TARGET_HEIGHT[key] ?? 1.8;
+    const extraAnims = obj?.anims
+      ? Object.entries(obj.anims).map(([k, f]) => ({ key: k, file: f }))
+      : [];
+    void loadModel(`/models/${file}`, height, yaw, extraAnims).then((m) => {
       if (m) set(m);
     });
   };
@@ -76,9 +88,15 @@ export async function preloadModels() {
   load('bug4', (m) => (registry.bugs[4] = m));
 }
 
-async function loadModel(url: string, targetHeight: number, faceYaw: number): Promise<LoadedModel | null> {
+async function loadModel(
+  url: string,
+  targetHeight: number,
+  faceYaw: number,
+  extraAnims: { key: string; file: string }[] = [],
+): Promise<LoadedModel | null> {
   try {
-    const gltf = await new GLTFLoader().loadAsync(url);
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(url);
     const wrapper = new THREE.Group();
     wrapper.add(gltf.scene);
 
@@ -91,10 +109,28 @@ async function loadModel(url: string, targetHeight: number, faceYaw: number): Pr
     box.setFromObject(gltf.scene);
     gltf.scene.position.y -= box.min.y;
 
-    console.info(
-      `[models] ${url} loaded (clips: ${gltf.animations.map((c) => c.name).join(', ') || 'none'})`,
-    );
-    return { template: wrapper, clips: gltf.animations };
+    // merge extra animation-only clips (same skeleton, bound by bone name).
+    // Strip root/hip translation so the clip drives pose only — the game owns
+    // position, otherwise the model double-moves / slides.
+    const clips = [...gltf.animations];
+    for (const a of extraAnims) {
+      try {
+        const ag = await loader.loadAsync(`/models/${a.file}`);
+        const clip = ag.animations[0];
+        if (clip) {
+          clip.name = a.key;
+          clip.tracks = clip.tracks.filter(
+            (t) => !(t.name.endsWith('.position') && /Hips|RootNode/.test(t.name)),
+          );
+          clips.push(clip);
+        }
+      } catch {
+        /* missing extra anim is non-fatal */
+      }
+    }
+
+    console.info(`[models] ${url} loaded (clips: ${clips.map((c) => c.name).join(', ') || 'none'})`);
+    return { template: wrapper, clips };
   } catch {
     return null;
   }
@@ -115,8 +151,12 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
     const move = find(/run/i) ?? find(/walk/i);
     const idle = find(/idle/i) ?? model.clips[0];
     const death = find(/death|die/i);
+    const back = find(/^back$/i) ?? find(/back/i);
+    const strafe = find(/^strafe$/i) ?? find(/strafe/i);
     if (move) actions.move = mixer.clipAction(move);
     if (idle) actions.idle = mixer.clipAction(idle);
+    if (back) actions.back = mixer.clipAction(back);
+    if (strafe) actions.strafe = mixer.clipAction(strafe);
     if (death) {
       actions.death = mixer.clipAction(death);
       actions.death.setLoop(THREE.LoopOnce, 1);
@@ -126,7 +166,16 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
   return { group, mixer, actions };
 }
 
-export function animateInstance(inst: ModelInstance, dt: number, speed: number, dead: boolean) {
+// `dir` (optional) is local-space velocity: forward>0 ahead, strafe = lateral.
+// When directional clips exist it picks forward/back/strafe; otherwise it
+// falls back to the single move clip.
+export function animateInstance(
+  inst: ModelInstance,
+  dt: number,
+  speed: number,
+  dead: boolean,
+  dir?: { forward: number; strafe: number },
+) {
   if (dead && !inst.actions.death) {
     // no death clip: keel over like the procedural rig does
     inst.group.rotation.z += (1.5 - inst.group.rotation.z) * Math.min(1, dt * 5);
@@ -134,19 +183,31 @@ export function animateInstance(inst: ModelInstance, dt: number, speed: number, 
     inst.group.rotation.z += (0 - inst.group.rotation.z) * Math.min(1, dt * 10);
   }
   if (!inst.mixer) return;
+  const a = inst.actions;
 
-  let target = dead
-    ? inst.actions.death ?? inst.actions.idle
-    : speed > 0.7
-      ? inst.actions.move ?? inst.actions.idle
-      : inst.actions.idle;
+  let target: THREE.AnimationAction | undefined;
+  if (dead) {
+    target = a.death ?? a.idle;
+  } else if (speed <= 0.7) {
+    target = a.idle;
+  } else if (dir && (a.back || a.strafe)) {
+    const af = Math.abs(dir.forward);
+    const as = Math.abs(dir.strafe);
+    if (as > af && a.strafe) target = a.strafe;
+    else if (dir.forward < -0.15 && a.back) target = a.back;
+    else target = a.move ?? a.idle;
+  } else {
+    target = a.move ?? a.idle;
+  }
+
   if (target && inst.current !== target) {
-    target.reset().fadeIn(0.18).play();
-    inst.current?.fadeOut(0.18);
+    target.reset().fadeIn(0.16).play();
+    inst.current?.fadeOut(0.16);
     inst.current = target;
   }
-  if (inst.actions.move && inst.current === inst.actions.move) {
-    inst.actions.move.timeScale = Math.max(0.55, speed / 5);
+  // speed-scale whichever locomotion clip is playing
+  if (inst.current && inst.current !== a.idle && inst.current !== a.death) {
+    inst.current.timeScale = Math.max(0.6, speed / 4.5);
   }
   inst.mixer.update(dt);
 }

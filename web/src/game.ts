@@ -597,7 +597,10 @@ export class Game {
         view.group.rotation.y = this.yaw;
         view.speed = this.vel.length();
         if (view.custom) {
-          animateInstance(view.custom, dt, view.speed, !this.alive);
+          // velocity in the soldier's local frame -> directional animation
+          const fwd = this.vel.x * Math.sin(this.yaw) + this.vel.z * Math.cos(this.yaw);
+          const lat = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
+          animateInstance(view.custom, dt, view.speed, !this.alive, { forward: fwd, strafe: lat });
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: view.speed,
@@ -610,12 +613,16 @@ export class Game {
         view.flashlight.intensity = this.alive ? 320 : 0;
       } else {
         const target = new THREE.Vector3(...p.pos);
+        const wvx = (target.x - view.lastPos.x) / Math.max(dt, 1e-3);
+        const wvz = (target.z - view.lastPos.z) / Math.max(dt, 1e-3);
         view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
         view.lastPos.copy(target);
         view.group.position.copy(target);
         view.group.rotation.y = p.yaw;
         if (view.custom) {
-          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead);
+          const fwd = wvx * Math.sin(p.yaw) + wvz * Math.cos(p.yaw);
+          const lat = wvx * Math.cos(p.yaw) - wvz * Math.sin(p.yaw);
+          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead, { forward: fwd, strafe: lat });
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: Math.min(view.speed, 9),
