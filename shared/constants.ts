@@ -35,19 +35,55 @@ export interface BugKindDef {
   name: string;
   hp: number;
   speed: number;
-  damage: number;
+  damage: number; // melee damage
   attackRange: number;
   attackCooldown: number;
   radius: number;
+  ranged?: boolean; // attacks with acid projectiles instead of (or beyond) melee
+  preferredRange?: number; // ranged kinds try to hold this distance
+  projDamage?: number;
+  charge?: boolean; // winds up and lunges
+  boss?: boolean; // huge, healthbar, special attacks, counts big toward the quota
 }
 
-// kind index into this array is what travels over the wire
+// kind index into this array is what travels over the wire. Append only —
+// never reorder, or every client renders the wrong creature.
 export const BUG_KINDS: BugKindDef[] = [
   { name: 'scavenger', hp: 30, speed: 6.4, damage: 8, attackRange: 1.6, attackCooldown: 0.9, radius: 0.55 },
   { name: 'warrior', hp: 130, speed: 4.6, damage: 17, attackRange: 2.0, attackCooldown: 1.2, radius: 0.85 },
+  { name: 'spitter', hp: 70, speed: 3.4, damage: 0, attackRange: 32, attackCooldown: 2.6, radius: 0.72,
+    ranged: true, preferredRange: 18, projDamage: 18 },
+  { name: 'charger', hp: 360, speed: 5.0, damage: 34, attackRange: 3.0, attackCooldown: 2.2, radius: 1.15,
+    charge: true },
+  { name: 'titan', hp: 3200, speed: 2.3, damage: 55, attackRange: 6.5, attackCooldown: 2.4, radius: 3.4,
+    ranged: true, preferredRange: 0, projDamage: 26, boss: true },
 ];
-export const BUG_AGGRO_RANGE = 55;
+export const BUG_AGGRO_RANGE = 60;
 export const BUG_SEPARATION = 1.25;
+
+// Acid globs flung by spitters and the titan.
+export const PROJECTILE = { speed: 27, gravity: 9.5, radius: 0.6, ttlS: 4 } as const;
+
+// Charger lunge: stop and telegraph, then burst straight ahead.
+export const CHARGE = { windupS: 0.45, lungeS: 0.7, speedMult: 3.1, minRange: 6, maxRange: 22, knockback: 4 } as const;
+
+// Titan stomp shockwave (close-range AOE).
+export const TITAN_STOMP = { radius: 6.5, damage: 42 } as const;
+
+// Boss arrival: once the squad is halfway to quota on a long enough mission.
+export const BOSS = { triggerFrac: 0.5, minKillTarget: 12, killReward: 8 } as const;
+
+// Relative spawn weights per kind, ramped by mission progress (0..1).
+export function spawnWeights(progress: number): number[] {
+  // scavenger, warrior, spitter, charger  (titan never spawns from the pool)
+  const t = Math.max(0, Math.min(1, progress));
+  return [
+    0.62 - 0.22 * t, // scavengers thin out as it heats up
+    0.26 + 0.04 * t,
+    0.08 + 0.10 * t, // more spitters later
+    0.04 + 0.08 * t, // more chargers later
+  ];
+}
 
 // Arrow codes use U/D/L/R characters.
 export const STRATAGEMS = {

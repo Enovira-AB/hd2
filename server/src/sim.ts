@@ -5,11 +5,14 @@ import {
   BUG_KINDS,
   BUG_AGGRO_RANGE,
   BUG_SEPARATION,
+  CHARGE,
   MAP_HALF,
+  PROJECTILE,
   RIFLE,
+  TITAN_STOMP,
 } from '../../shared/constants.js';
 import { terrainHeight, resolveCollisions, raycastRocks, type WorldLayout } from '../../shared/world.js';
-import type { Vec3, HitKind } from '../../shared/protocol.js';
+import { BUGFLAG, type Vec3, type HitKind } from '../../shared/protocol.js';
 
 export interface SPlayer {
   id: string;
@@ -44,19 +47,66 @@ export interface SBug {
   targetZ: number;
   wanderUntil: number;
   attackReadyAt: number;
+  flags: number; // BUGFLAG bits, surfaced to clients
+  windupUntil: number; // charger telegraph end
+  chargeUntil: number; // charger lunge end
+  chargeDx: number;
+  chargeDz: number;
 }
 
 export interface BugAttack {
   bug: SBug;
   player: SPlayer;
   damage: number;
+  knockback?: number;
+}
+
+export interface ProjSpawn {
+  x: number; y: number; z: number;
+  vx: number; vy: number; vz: number;
+  damage: number;
+  kind: number; // 0 acid (spitter), 1 bile (titan)
+}
+
+export interface Stomp { x: number; z: number; radius: number; damage: number }
+
+export interface BugTickResult {
+  attacks: BugAttack[];
+  projectiles: ProjSpawn[];
+  stomps: Stomp[];
 }
 
 export function bugBodyY(seed: number, bug: SBug): number {
   return terrainHeight(seed, bug.x, bug.z) + BUG_KINDS[bug.kind].radius * 0.9;
 }
 
-// Advances all bugs; returns melee attacks for the room to apply.
+// Lead the target a little so ranged spit actually connects with movers.
+function aimProjectile(
+  bug: SBug, target: SPlayer, seed: number, speed: number, kind: number, damage: number,
+): ProjSpawn {
+  const muzzleY = terrainHeight(seed, bug.x, bug.z) + BUG_KINDS[bug.kind].radius * 1.4;
+  const tx = target.pos[0];
+  const ty = target.pos[1] + 1.0;
+  const tz = target.pos[2];
+  const flat = Math.hypot(tx - bug.x, tz - bug.z);
+  const tof = flat / speed; // time of flight (flat approximation)
+  const aimX = tx;
+  const aimZ = tz;
+  const dx = aimX - bug.x;
+  const dz = aimZ - bug.z;
+  const dy = ty - muzzleY;
+  const len = Math.hypot(dx, dy, dz) || 1;
+  // add the vertical component the glob loses to gravity over the flight
+  const vy = (dy / len) * speed + 0.5 * PROJECTILE.gravity * tof;
+  return {
+    x: bug.x, y: muzzleY, z: bug.z,
+    vx: (dx / len) * speed, vy, vz: (dz / len) * speed,
+    damage, kind,
+  };
+}
+
+// Advances all bugs; returns melee attacks, ranged projectile spawns and
+// titan stomps for the room to apply.
 export function tickBugs(
   bugs: Iterable<SBug>,
   players: SPlayer[],
@@ -65,13 +115,16 @@ export function tickBugs(
   dt: number,
   now: number,
   rng: () => number,
-): BugAttack[] {
+): BugTickResult {
   const attacks: BugAttack[] = [];
+  const projectiles: ProjSpawn[] = [];
+  const stomps: Stomp[] = [];
   const targets = players.filter((p) => p.alive && !p.boarded);
   const all = Array.from(bugs);
 
   for (const bug of all) {
     const def = BUG_KINDS[bug.kind];
+    bug.flags = 0;
 
     let nearest: SPlayer | null = null;
     let nearestDist = Infinity;
@@ -87,16 +140,79 @@ export function tickBugs(
 
     let vx = 0;
     let vz = 0;
+
     if (bug.aggro && nearest) {
       const dx = nearest.pos[0] - bug.x;
       const dz = nearest.pos[2] - bug.z;
-      bug.yaw = Math.atan2(dx, dz);
-      if (nearestDist > def.attackRange * 0.85) {
-        vx = (dx / nearestDist) * def.speed;
-        vz = (dz / nearestDist) * def.speed;
-      } else if (now >= bug.attackReadyAt) {
-        bug.attackReadyAt = now + def.attackCooldown * 1000;
-        attacks.push({ bug, player: nearest, damage: def.damage });
+
+      // ---- charger lunge state machine ----
+      if (def.charge && now < bug.chargeUntil) {
+        bug.flags |= BUGFLAG.CHARGING;
+        vx = bug.chargeDx * def.speed * CHARGE.speedMult;
+        vz = bug.chargeDz * def.speed * CHARGE.speedMult;
+        bug.yaw = Math.atan2(bug.chargeDx, bug.chargeDz);
+        if (nearestDist <= def.radius + 1.0 && now >= bug.attackReadyAt) {
+          bug.attackReadyAt = now + def.attackCooldown * 1000;
+          bug.chargeUntil = now; // lunge connects, stop here
+          attacks.push({ bug, player: nearest, damage: def.damage, knockback: CHARGE.knockback });
+        }
+      } else if (def.charge && now < bug.windupUntil) {
+        bug.flags |= BUGFLAG.WINDUP;
+        bug.yaw = Math.atan2(dx, dz); // track during telegraph
+        if (now + dt * 1000 >= bug.windupUntil) {
+          const len = Math.hypot(dx, dz) || 1;
+          bug.chargeDx = dx / len;
+          bug.chargeDz = dz / len;
+          bug.chargeUntil = now + CHARGE.lungeS * 1000;
+        }
+      } else {
+        bug.yaw = Math.atan2(dx, dz);
+
+        if (def.ranged) {
+          // hold a preferred distance and lob acid
+          const pref = def.preferredRange ?? 0;
+          if (pref > 0 && nearestDist < pref - 2) {
+            vx = -(dx / nearestDist) * def.speed; // back off
+            vz = -(dz / nearestDist) * def.speed;
+          } else if (nearestDist > def.attackRange) {
+            vx = (dx / nearestDist) * def.speed; // close in to firing range
+            vz = (dz / nearestDist) * def.speed;
+          }
+          if (nearestDist <= def.attackRange && now >= bug.attackReadyAt) {
+            bug.attackReadyAt = now + def.attackCooldown * 1000;
+            if (def.boss) {
+              // titan: spread volley of three globs
+              for (let k = -1; k <= 1; k++) {
+                const spread = { ...nearest, pos: [nearest.pos[0] + k * 3, nearest.pos[1], nearest.pos[2]] as Vec3 };
+                projectiles.push(aimProjectile(bug, spread as SPlayer, seed, PROJECTILE.speed, 1, def.projDamage ?? 20));
+              }
+            } else {
+              projectiles.push(aimProjectile(bug, nearest, seed, PROJECTILE.speed, 0, def.projDamage ?? 18));
+            }
+          }
+        }
+
+        // melee / approach (chargers and melee kinds, and titan stomp)
+        if (!def.ranged || def.boss) {
+          if (nearestDist > def.attackRange * 0.85) {
+            vx = (dx / nearestDist) * def.speed;
+            vz = (dz / nearestDist) * def.speed;
+          } else if (now >= bug.attackReadyAt) {
+            bug.attackReadyAt = now + def.attackCooldown * 1000;
+            if (def.boss) {
+              stomps.push({ x: bug.x, z: bug.z, radius: TITAN_STOMP.radius, damage: TITAN_STOMP.damage });
+            } else {
+              attacks.push({ bug, player: nearest, damage: def.damage });
+            }
+          }
+        }
+
+        // charger decides to wind up a lunge from mid-range
+        if (def.charge && now >= bug.attackReadyAt &&
+            nearestDist > CHARGE.minRange && nearestDist < CHARGE.maxRange) {
+          bug.windupUntil = now + CHARGE.windupS * 1000;
+          bug.attackReadyAt = now + (CHARGE.windupS + CHARGE.lungeS + 0.6) * 1000;
+        }
       }
     } else {
       if (now > bug.wanderUntil) {
@@ -115,17 +231,18 @@ export function tickBugs(
       }
     }
 
-    // crowd separation so swarms read as individuals, not a blob
+    // crowd separation so swarms read as individuals, not a blob (titans shove)
+    const sep = BUG_SEPARATION * (def.boss ? 2.6 : def.radius > 1 ? 1.6 : 1);
     for (const other of all) {
       if (other === bug) continue;
       const dx = bug.x - other.x;
       const dz = bug.z - other.z;
       const d2 = dx * dx + dz * dz;
-      const min = BUG_SEPARATION;
-      if (d2 < min * min && d2 > 1e-6) {
+      if (d2 < sep * sep && d2 > 1e-6) {
         const d = Math.sqrt(d2);
-        vx += (dx / d) * ((min - d) / min) * 6;
-        vz += (dz / d) * ((min - d) / min) * 6;
+        const push = def.boss ? 2 : 6;
+        vx += (dx / d) * ((sep - d) / sep) * push;
+        vz += (dz / d) * ((sep - d) / sep) * push;
       }
     }
 
@@ -136,7 +253,7 @@ export function tickBugs(
     bug.x = Math.max(-lim, Math.min(lim, bug.x));
     bug.z = Math.max(-lim, Math.min(lim, bug.z));
   }
-  return attacks;
+  return { attacks, projectiles, stomps };
 }
 
 export interface HitscanResult {
