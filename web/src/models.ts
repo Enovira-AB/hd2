@@ -20,7 +20,8 @@ export interface ModelInstance {
     idle?: THREE.AnimationAction;
     death?: THREE.AnimationAction;
     back?: THREE.AnimationAction; // moving backward
-    strafe?: THREE.AnimationAction; // lateral
+    strafe?: THREE.AnimationAction; // strafing left
+    strafeR?: THREE.AnimationAction; // strafing right
     fire?: THREE.AnimationAction; // additive upper-body firing overlay
   };
   current?: THREE.AnimationAction;
@@ -120,9 +121,14 @@ async function loadModel(
         const clip = ag.animations[0];
         if (clip) {
           clip.name = a.key;
-          clip.tracks = clip.tracks.filter(
-            (t) => !(t.name.endsWith('.position') && /Hips|RootNode/.test(t.name)),
-          );
+          // Strip root/hip translation on looping locomotion so the game owns
+          // position (no sliding). Keep it for death so the body actually
+          // stumbles and falls instead of collapsing in place.
+          if (!/death|die/i.test(a.key)) {
+            clip.tracks = clip.tracks.filter(
+              (t) => !(t.name.endsWith('.position') && /Hips|RootNode/.test(t.name)),
+            );
+          }
           clips.push(clip);
         }
       } catch {
@@ -154,11 +160,13 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
     const idle = find(/rifle_idle/i) ?? find(/idle/i) ?? model.clips[0];
     const death = find(/death|die/i);
     const back = find(/^back$/i) ?? find(/back/i);
-    const strafe = find(/^strafe$/i) ?? find(/strafe/i);
+    const strafe = find(/^strafe$/i);
+    const strafeR = find(/strafe_r/i);
     if (move) actions.move = mixer.clipAction(move);
     if (idle) actions.idle = mixer.clipAction(idle);
     if (back) actions.back = mixer.clipAction(back);
     if (strafe) actions.strafe = mixer.clipAction(strafe);
+    if (strafeR) actions.strafeR = mixer.clipAction(strafeR);
     if (death) {
       actions.death = mixer.clipAction(death);
       actions.death.setLoop(THREE.LoopOnce, 1);
@@ -203,12 +211,17 @@ export function animateInstance(
     target = a.death ?? a.idle;
   } else if (speed <= 0.7) {
     target = a.idle;
-  } else if (dir && (a.back || a.strafe)) {
+  } else if (dir && (a.back || a.strafe || a.strafeR)) {
     const af = Math.abs(dir.forward);
     const as = Math.abs(dir.strafe);
-    if (as > af && a.strafe) target = a.strafe;
-    else if (dir.forward < -0.15 && a.back) target = a.back;
-    else target = a.move ?? a.idle;
+    if (as > af && (a.strafe || a.strafeR)) {
+      // strafe right uses strafeR, left uses strafe; fall back to either
+      target = (dir.strafe > 0 ? a.strafeR : a.strafe) ?? a.strafe ?? a.strafeR;
+    } else if (dir.forward < -0.15 && a.back) {
+      target = a.back;
+    } else {
+      target = a.move ?? a.idle;
+    }
   } else {
     target = a.move ?? a.idle;
   }
