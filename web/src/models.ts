@@ -23,6 +23,7 @@ export interface ModelInstance {
     strafe?: THREE.AnimationAction; // strafing left
     strafeR?: THREE.AnimationAction; // strafing right
     fire?: THREE.AnimationAction; // additive upper-body firing overlay
+    attack?: THREE.AnimationAction; // melee swipe (enemies)
   };
   current?: THREE.AnimationAction;
 }
@@ -172,6 +173,8 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
       actions.death.setLoop(THREE.LoopOnce, 1);
       actions.death.clampWhenFinished = true;
     }
+    const attack = find(/^attack$/i) ?? find(/swip|punch|attack/i);
+    if (attack) actions.attack = mixer.clipAction(attack);
     // firing as an additive overlay so the upper body fires while the legs
     // keep running/strafing. Clone per-instance: makeClipAdditive mutates.
     const fire = find(/^fire$/i);
@@ -196,6 +199,7 @@ export function animateInstance(
   dead: boolean,
   dir?: { forward: number; strafe: number },
   firing = false,
+  attacking = false,
 ) {
   if (dead && !inst.actions.death) {
     // no death clip: keel over like the procedural rig does
@@ -209,6 +213,8 @@ export function animateInstance(
   let target: THREE.AnimationAction | undefined;
   if (dead) {
     target = a.death ?? a.idle;
+  } else if (attacking && a.attack) {
+    target = a.attack;
   } else if (speed <= 0.7) {
     target = a.idle;
   } else if (dir && (a.back || a.strafe || a.strafeR)) {
@@ -231,8 +237,8 @@ export function animateInstance(
     inst.current?.fadeOut(0.16);
     inst.current = target;
   }
-  // speed-scale whichever locomotion clip is playing
-  if (inst.current && inst.current !== a.idle && inst.current !== a.death) {
+  // speed-scale whichever locomotion clip is playing (not idle/death/attack)
+  if (inst.current && inst.current !== a.idle && inst.current !== a.death && inst.current !== a.attack) {
     inst.current.timeScale = Math.max(0.6, speed / 4.5);
   }
   // ramp the additive firing overlay in/out

@@ -16,6 +16,14 @@
   "bug0": null,
   "bug1": null,
   "bug2": null,
-  "bug3": null,
+  "bug3": {
+    "file": "warrok.glb",
+    "height": 2.4,
+    "anims": {
+      "idle": "anims/mutant_idle.glb",
+      "run": "anims/mutant_run.glb",
+      "attack": "anims/mutant_swipe.glb"
+    }
+  },
   "bug4": null
 }

@@ -15,7 +15,7 @@ import {
   animateInstance, findNode, getBugModel, getSoldierModel, instantiate,
   type ModelInstance,
 } from './models.js';
-import { ANIM, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
+import { ANIM, BUGFLAG, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
   MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
   type StratagemKind,
@@ -663,13 +663,20 @@ export class Game {
         this.world.scene.add(view.group);
         this.bugViews.set(b.id, view);
       }
-      const target = new THREE.Vector3(b.pos[0], b.pos[1] - 0.42, b.pos[2]);
+      // procedural rigs sit with their body raised (-0.42 tuning); GLB models
+      // are normalized feet-at-0, so plant them on the terrain instead.
+      const groundY = this.world.terrainY(b.pos[0], b.pos[2]);
+      const target = new THREE.Vector3(b.pos[0], view.custom ? groundY : b.pos[1] - 0.42, b.pos[2]);
       view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
       view.lastPos.copy(target);
       view.group.position.copy(target);
       view.group.rotation.y = b.yaw;
-      if (view.custom) animateInstance(view.custom, dt, Math.min(view.speed, 8), false);
-      else if (view.rig) animateBug(view.rig, dt, Math.min(view.speed, 8), time);
+      if (view.custom) {
+        const attacking = ((b.flags ?? 0) & BUGFLAG.WINDUP) !== 0;
+        animateInstance(view.custom, dt, Math.min(view.speed, 8), false, undefined, false, attacking);
+      } else if (view.rig) {
+        animateBug(view.rig, dt, Math.min(view.speed, 8), time);
+      }
     }
     for (const [id, view] of this.bugViews) {
       if (!seenBugs.has(id)) {
