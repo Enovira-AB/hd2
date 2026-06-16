@@ -21,6 +21,7 @@ export interface ModelInstance {
     death?: THREE.AnimationAction;
     back?: THREE.AnimationAction; // moving backward
     strafe?: THREE.AnimationAction; // lateral
+    fire?: THREE.AnimationAction; // additive upper-body firing overlay
   };
   current?: THREE.AnimationAction;
 }
@@ -148,8 +149,9 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
   if (model.clips.length > 0) {
     mixer = new THREE.AnimationMixer(group);
     const find = (re: RegExp) => model.clips.find((c) => re.test(c.name));
-    const move = find(/run/i) ?? find(/walk/i);
-    const idle = find(/idle/i) ?? model.clips[0];
+    // prefer purpose-made rifle clips over a model's generic built-ins
+    const move = find(/rifle_run/i) ?? find(/run/i) ?? find(/walk/i);
+    const idle = find(/rifle_idle/i) ?? find(/idle/i) ?? model.clips[0];
     const death = find(/death|die/i);
     const back = find(/^back$/i) ?? find(/back/i);
     const strafe = find(/^strafe$/i) ?? find(/strafe/i);
@@ -161,6 +163,16 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
       actions.death = mixer.clipAction(death);
       actions.death.setLoop(THREE.LoopOnce, 1);
       actions.death.clampWhenFinished = true;
+    }
+    // firing as an additive overlay so the upper body fires while the legs
+    // keep running/strafing. Clone per-instance: makeClipAdditive mutates.
+    const fire = find(/^fire$/i);
+    if (fire) {
+      const additive = THREE.AnimationUtils.makeClipAdditive(fire.clone());
+      actions.fire = mixer.clipAction(additive, group, THREE.AdditiveAnimationBlendMode);
+      actions.fire.setLoop(THREE.LoopRepeat, Infinity);
+      actions.fire.weight = 0;
+      actions.fire.play();
     }
   }
   return { group, mixer, actions };
@@ -175,6 +187,7 @@ export function animateInstance(
   speed: number,
   dead: boolean,
   dir?: { forward: number; strafe: number },
+  firing = false,
 ) {
   if (dead && !inst.actions.death) {
     // no death clip: keel over like the procedural rig does
@@ -208,6 +221,11 @@ export function animateInstance(
   // speed-scale whichever locomotion clip is playing
   if (inst.current && inst.current !== a.idle && inst.current !== a.death) {
     inst.current.timeScale = Math.max(0.6, speed / 4.5);
+  }
+  // ramp the additive firing overlay in/out
+  if (a.fire) {
+    const targetW = firing && !dead ? 1 : 0;
+    a.fire.weight += (targetW - a.fire.weight) * Math.min(1, dt * 14);
   }
   inst.mixer.update(dt);
 }

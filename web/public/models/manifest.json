@@ -3,7 +3,13 @@
   "soldier": {
     "file": "soldier.glb",
     "yaw": 0,
-    "anims": { "back": "anims/run_back.glb", "strafe": "anims/strafe.glb" }
+    "anims": {
+      "rifle_idle": "anims/rifle_idle.glb",
+      "rifle_run": "anims/rifle_run.glb",
+      "fire": "anims/fire.glb",
+      "back": "anims/run_back.glb",
+      "strafe": "anims/strafe.glb"
+    }
   },
   "bug0": null,
   "bug1": null,

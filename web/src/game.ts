@@ -600,7 +600,8 @@ export class Game {
           // velocity in the soldier's local frame -> directional animation
           const fwd = this.vel.x * Math.sin(this.yaw) + this.vel.z * Math.cos(this.yaw);
           const lat = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
-          animateInstance(view.custom, dt, view.speed, !this.alive, { forward: fwd, strafe: lat });
+          animateInstance(view.custom, dt, view.speed, !this.alive, { forward: fwd, strafe: lat },
+            this.input.fireHeld && this.alive);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: view.speed,
@@ -622,7 +623,8 @@ export class Game {
         if (view.custom) {
           const fwd = wvx * Math.sin(p.yaw) + wvz * Math.cos(p.yaw);
           const lat = wvx * Math.cos(p.yaw) - wvz * Math.sin(p.yaw);
-          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead, { forward: fwd, strafe: lat });
+          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead, { forward: fwd, strafe: lat },
+            (p.anim & ANIM.FIRING) !== 0);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: Math.min(view.speed, 9),
