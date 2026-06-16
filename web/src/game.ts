@@ -86,6 +86,10 @@ export class Game {
     private fx: Effects,
   ) {
     this.wireEvents();
+    // thunder trails the flash (sound is slower than light)
+    this.world.onLightning = () => {
+      window.setTimeout(() => this.sfx.thunder(), 250 + Math.random() * 1400);
+    };
   }
 
   private selfState() {
@@ -333,6 +337,12 @@ export class Game {
     this.updateInteract();
     this.reconcileViews(dt, time);
     this.updateProjectilesAndBoss();
+    // tension audio swells with the swarm closing in
+    let near = 0;
+    for (const v of this.bugViews.values()) {
+      if (v.group.position.distanceTo(this.pos) < 22) near++;
+    }
+    this.sfx.setTension(this.alive ? Math.min(1, near / 8) : 0);
     this.updateHud();
     this.sendState();
   }

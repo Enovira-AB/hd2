@@ -95,6 +95,15 @@ export class World3D {
   private padHalo!: THREE.Sprite;
   private padMode: 'off' | 'on' | 'blink' = 'off';
 
+  // weather
+  private lightningLight!: THREE.DirectionalLight;
+  private rain!: THREE.Points;
+  private rainVel!: Float32Array;
+  private nextLightningAt = 6;
+  private flashEnv = 0; // lightning brightness envelope
+  private weatherClock = 0;
+  onLightning: (() => void) | null = null; // fired when a bolt strikes (for thunder)
+
   constructor(canvas: HTMLCanvasElement, mobile: boolean) {
     this.mobile = mobile;
     this.renderer = new THREE.WebGLRenderer({
@@ -130,8 +139,14 @@ export class World3D {
     }
     this.scene.add(this.moon, this.moon.target);
 
+    // lightning: a hard white flash light, dark until a bolt strikes
+    this.lightningLight = new THREE.DirectionalLight(0xdfe8ff, 0);
+    this.lightningLight.position.set(-30, 90, -40);
+    this.scene.add(this.lightningLight);
+
     this.buildSky();
     this.buildDust();
+    this.buildRain();
     this.scene.add(this.worldGroup);
 
     this.composer = new EffectComposer(this.renderer);
@@ -275,6 +290,29 @@ export class World3D {
       this.mist.push(s);
       this.scene.add(s);
     }
+  }
+
+  private buildRain() {
+    const n = this.mobile ? 700 : 1500;
+    const pos = new Float32Array(n * 3);
+    this.rainVel = new Float32Array(n);
+    const rng = mulberry32(55);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = (rng() - 0.5) * 70;
+      pos[i * 3 + 1] = rng() * 34;
+      pos[i * 3 + 2] = (rng() - 0.5) * 70;
+      this.rainVel[i] = 28 + rng() * 16;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.rain = new THREE.Points(
+      geo,
+      new THREE.PointsMaterial({
+        color: 0x9fb0c8, size: 0.07, transparent: true, opacity: 0.5, depthWrite: false,
+      }),
+    );
+    this.rain.frustumCulled = false;
+    this.scene.add(this.rain);
   }
 
   // ---- world from seed ---------------------------------------------------------
@@ -459,6 +497,32 @@ export class World3D {
     return terrainHeight(this.seed, x, z);
   }
 
+  private updateWeather(dt: number, _time: number, focus: THREE.Vector3) {
+    // rain falls around the player with a little wind
+    const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;
+    this.rain.position.set(focus.x, 0, focus.z);
+    for (let i = 0; i < p.count; i++) {
+      let y = p.getY(i) - this.rainVel[i] * dt;
+      let x = p.getX(i) + 3 * dt;
+      if (y < 0) y += 34;
+      if (x > 35) x -= 70;
+      p.setX(i, x);
+      p.setY(i, y);
+    }
+    p.needsUpdate = true;
+
+    // lightning on a random cadence: sharp flash + flicker, decaying fast
+    this.weatherClock += dt;
+    if (this.weatherClock >= this.nextLightningAt) {
+      this.nextLightningAt = this.weatherClock + 9 + Math.random() * 15;
+      this.flashEnv = 1.2;
+      this.onLightning?.();
+    }
+    this.flashEnv = Math.max(0, this.flashEnv - dt * 7);
+    const flicker = this.flashEnv > 0.25 && Math.random() < 0.5 ? 1.5 : 1;
+    this.lightningLight.intensity = this.flashEnv * 6 * flicker;
+  }
+
   // ---- per-frame ---------------------------------------------------------------
 
   update(dt: number, time: number, focus: THREE.Vector3) {
@@ -472,6 +536,7 @@ export class World3D {
     this.dust.rotation.y = time * 0.004;
 
     this.skyMat.uniforms.uTime.value = time;
+    this.updateWeather(dt, time, focus);
 
     // mist drifts slowly and stays loosely centered on the player
     for (const m of this.mist) {

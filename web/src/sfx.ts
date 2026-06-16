@@ -120,6 +120,22 @@ export class Sfx {
     this.playNoise('bandpass', 500, 90, 0.5, 0.9);
   }
 
+  thunder() {
+    if (!this.ctx) return;
+    // deep rolling rumble: low filtered noise + a sub drop
+    this.playNoise('lowpass', 320, 60, 1.0, 2.2);
+    this.playNoise('lowpass', 140, 45, 0.7, 1.6);
+    this.playOsc('sine', 60, 28, 0.5, 1.4);
+  }
+
+  // Ominous low pad whose volume tracks nearby threat (0..1). Cheap, persistent.
+  private tensionGain: GainNode | null = null;
+  setTension(level: number) {
+    if (!this.ctx || !this.tensionGain) return;
+    const v = Math.max(0, Math.min(1, level));
+    this.tensionGain.gain.setTargetAtTime(v * 0.06, this.ctx.currentTime, 0.4);
+  }
+
   private startWind() {
     if (!this.ctx || !this.master || !this.noise) return;
     const src = this.ctx.createBufferSource();
@@ -138,5 +154,20 @@ export class Sfx {
     src.connect(filter).connect(gain).connect(this.master);
     src.start();
     lfo.start();
+
+    // tension drone: two detuned low oscillators through a lowpass, gain 0 idle
+    this.tensionGain = this.ctx.createGain();
+    this.tensionGain.gain.value = 0;
+    const tFilter = this.ctx.createBiquadFilter();
+    tFilter.type = 'lowpass';
+    tFilter.frequency.value = 180;
+    for (const f of [55, 55.4]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      o.connect(tFilter);
+      o.start();
+    }
+    tFilter.connect(this.tensionGain).connect(this.master);
   }
 }
