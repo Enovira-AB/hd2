@@ -12,6 +12,7 @@ export const ANIM = {
   RELOADING: 8,
   DEAD: 16,
   STRAT: 32, // punching in a stratagem code
+  DIVING: 64, // mid dive/dodge roll
 } as const;
 
 export interface PlayerState {
@@ -55,6 +56,19 @@ export interface SupplyState {
   charges: number;
 }
 
+export interface SentryState {
+  id: number;
+  pos: Vec3;
+  yaw: number;
+  hp: number;
+}
+
+export interface FireZoneState {
+  id: number;
+  pos: Vec3;
+  radius: number;
+}
+
 export type MissionPhase =
   | 'LOBBY'
   | 'DROP'
@@ -65,14 +79,26 @@ export type MissionPhase =
   | 'COMPLETE'
   | 'FAILED';
 
+export type MissionObjective = 'ERADICATE' | 'NESTS';
+
 export interface MissionState {
   phase: MissionPhase;
   seed: number;
+  objective: MissionObjective;
   kills: number;
   killTarget: number;
+  nestsLeft: number; // live bug nests (NESTS objective)
+  nestsTotal: number;
   reinforceLeft: number;
   // server clock (ms) when the current phase auto-advances; 0 if not timed
   phaseEndsAt: number;
+}
+
+export interface NestState {
+  i: number; // index into the layout's nests
+  pos: Vec3;
+  hp: number;
+  hpMax: number;
 }
 
 export type ClientMsg =
@@ -80,12 +106,13 @@ export type ClientMsg =
   | { type: 'start' }
   | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
+  | { type: 'dive'; dir: Vec3 }
   | { type: 'reload' }
   | { type: 'stratagem'; kind: string; target: Vec3 }
   | { type: 'interact' }
   | { type: 'ping'; t: number };
 
-export type HitKind = 'bug' | 'player' | 'rock' | 'none';
+export type HitKind = 'bug' | 'player' | 'rock' | 'nest' | 'none';
 
 export type ServerMsg =
   | {
@@ -107,11 +134,17 @@ export type ServerMsg =
       supplies: SupplyState[];
       mission: MissionState;
       projectiles?: ProjectileState[]; // omitted when none in flight
+      sentries?: SentryState[]; // deployed auto-turrets
+      fires?: FireZoneState[]; // burning napalm zones
+      nests?: NestState[]; // live destructible nests
       boss?: { id: number; hp: number; hpMax: number } | null; // titan healthbar
     }
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
+  | { type: 'sentryFire'; id: number; from: Vec3; to: Vec3 } // turret tracer
+  | { type: 'recon'; pos: Vec3 } // recon pulse ping (clients reveal nearby bugs)
   | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
   | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
+  | { type: 'nestDeath'; i: number; pos: Vec3 } // a nest was sealed/destroyed
   | { type: 'boss'; pos: Vec3 } // titan arrival
   | { type: 'hit'; id: string; hp: number } // a player took damage
   | { type: 'down'; id: string }

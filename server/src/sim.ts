@@ -32,6 +32,10 @@ export interface SPlayer {
   pendingReload: boolean;
   lastDamageAt: number;
   lastStateAt: number;
+  diveUntil: number; // server-driven dive in progress until this clock time
+  diveReadyAt: number; // cooldown
+  diveDx: number;
+  diveDz: number;
 }
 
 export interface SBug {
@@ -262,6 +266,7 @@ export interface HitscanResult {
   kind: HitKind;
   bug?: SBug;
   player?: SPlayer;
+  nestIndex?: number;
 }
 
 function raySphere(
@@ -291,6 +296,7 @@ export function hitscan(
   layout: WorldLayout,
   bugs: Iterable<SBug>,
   players: Iterable<SPlayer>,
+  nestHp?: number[],
 ): HitscanResult {
   let best: HitscanResult = { dist: RIFLE.range, point: pointAt(origin, dir, RIFLE.range), kind: 'none' };
 
@@ -304,6 +310,15 @@ export function hitscan(
   for (const bug of bugs) {
     const t = raySphere(origin, dir, bug.x, bugBodyY(seed, bug), bug.z, BUG_KINDS[bug.kind].radius * 1.15);
     if (t < best.dist) best = { dist: t, point: pointAt(origin, dir, t), kind: 'bug', bug };
+  }
+
+  if (nestHp) {
+    for (let i = 0; i < layout.nests.length; i++) {
+      if (nestHp[i] <= 0) continue;
+      const n = layout.nests[i];
+      const t = raySphere(origin, dir, n.x, terrainHeight(seed, n.x, n.z) + 1.0, n.z, 2.7);
+      if (t < best.dist) best = { dist: t, point: pointAt(origin, dir, t), kind: 'nest', nestIndex: i };
+    }
   }
 
   for (const p of players) {

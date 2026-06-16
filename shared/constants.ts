@@ -22,6 +22,10 @@ export const PLAYER_RADIUS = 0.45;
 export const REGEN_DELAY_S = 6;
 export const REGEN_PER_S = 9;
 
+// Dive/dodge roll: a fast server-driven lunge with brief invulnerability —
+// the counter to charger lunges and getting swarmed.
+export const DIVE = { speed: 12.5, durationS: 0.45, cooldownS: 1.3 } as const;
+
 export const RIFLE = {
   damage: 34,
   magSize: 30,
@@ -73,6 +77,9 @@ export const TITAN_STOMP = { radius: 6.5, damage: 42 } as const;
 // Boss arrival: once the squad is halfway to quota on a long enough mission.
 export const BOSS = { triggerFrac: 0.5, minKillTarget: 12, killReward: 8 } as const;
 
+// Destructible bug nests. On NESTS missions, sealing them all is the objective.
+export const NEST = { hp: 600 } as const;
+
 // Relative spawn weights per kind, ramped by mission progress (0..1).
 export function spawnWeights(progress: number): number[] {
   // scavenger, warrior, spitter, charger  (titan never spawns from the pool)
@@ -90,10 +97,20 @@ export const STRATAGEMS = {
   REINFORCE: { code: 'UDRLU', deployDelayS: 2.2, label: 'Reinforce' },
   ORBITAL: { code: 'RRU', deployDelayS: 3.0, label: 'Orbital Strike' },
   RESUPPLY: { code: 'DDUR', deployDelayS: 2.5, label: 'Resupply' },
+  SENTRY: { code: 'DURU', deployDelayS: 2.0, label: 'Sentry Gun' },
+  NAPALM: { code: 'RRDU', deployDelayS: 2.8, label: 'Napalm Barrage' },
+  RECON: { code: 'UUD', deployDelayS: 0.4, label: 'Recon Pulse' },
 } as const;
 export type StratagemKind = keyof typeof STRATAGEMS;
 export const ORBITAL_RADIUS = 9;
 export const ORBITAL_DAMAGE = 420; // friendly fire applies
+
+// Auto-turret: targets the nearest bug in range and chips it down.
+export const SENTRY = { hp: 90, lifetimeS: 45, range: 42, fireInterval: 0.16, damage: 26 } as const;
+// Burning area denial; damages bugs and players standing in it (friendly fire).
+export const NAPALM = { radius: 8, durationS: 6, dps: 55 } as const;
+// Sweeps the dark: pings every bug within range so the squad sees them.
+export const RECON = { range: 95, durationS: 6 } as const;
 
 export const MISSION = {
   killBase: 15,

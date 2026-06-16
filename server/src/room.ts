@@ -3,26 +3,35 @@ import {
   ANIM,
   type BugState,
   type ClientMsg,
+  type FireZoneState,
+  type MissionObjective,
   type MissionState,
+  type NestState,
   type PlayerState,
   type ProjectileState,
+  type SentryState,
   type ServerMsg,
   type Vec3,
 } from '../../shared/protocol.js';
 import {
   BOSS,
   BUG_KINDS,
+  DIVE,
   MAP_HALF,
   MAX_PLAYERS,
   MISSION,
+  NAPALM,
+  NEST,
   ORBITAL_DAMAGE,
   ORBITAL_RADIUS,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
   PROJECTILE,
+  RECON,
   REGEN_DELAY_S,
   REGEN_PER_S,
   RIFLE,
+  SENTRY,
   SPEED_TOLERANCE,
   SPRINT_SPEED,
   STRATAGEMS,
@@ -46,6 +55,23 @@ interface SProjectile {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   damage: number;
+  dieAt: number;
+}
+
+interface SSentry {
+  id: number;
+  x: number; y: number; z: number;
+  yaw: number;
+  hp: number;
+  dieAt: number;
+  fireReadyAt: number;
+  owner: string;
+}
+
+interface SFire {
+  id: number;
+  x: number; z: number;
+  radius: number;
   dieAt: number;
 }
 
@@ -80,10 +106,13 @@ export class Room {
   private players = new Map<string, SPlayer>();
   private bugs = new Map<number, SBug>();
   private projectiles = new Map<number, SProjectile>();
+  private sentries = new Map<number, SSentry>();
+  private fires = new Map<number, SFire>();
   private supplies = new Map<number, Supply>();
   private pendingStrats: PendingStrat[] = [];
   private titanId = 0; // bug id of the live titan, 0 if none
   private titanSpawned = false; // already arrived this mission
+  private nestHp: number[] = []; // parallel to layout.nests; 0 = destroyed
   private mission: MissionState;
   private layout: WorldLayout;
   private hostId = '';
@@ -101,8 +130,11 @@ export class Room {
     this.mission = {
       phase: 'LOBBY',
       seed,
+      objective: 'ERADICATE',
       kills: 0,
       killTarget: 0,
+      nestsLeft: 0,
+      nestsTotal: 0,
       reinforceLeft: 0,
       phaseEndsAt: 0,
     };
@@ -146,6 +178,10 @@ export class Room {
       pendingReload: false,
       lastDamageAt: 0,
       lastStateAt: Date.now(),
+      diveUntil: 0,
+      diveReadyAt: 0,
+      diveDx: 0,
+      diveDz: 0,
     };
     this.sockets.set(ws, player);
     this.players.set(id, player);
@@ -189,6 +225,9 @@ export class Room {
       case 'state':
         this.handleState(player, msg.pos, msg.yaw, msg.pitch, msg.anim);
         break;
+      case 'dive':
+        this.handleDive(player, msg.dir);
+        break;
       case 'fire':
         this.handleFire(player, msg.origin, msg.dir);
         break;
@@ -218,18 +257,29 @@ export class Room {
     const now = Date.now();
     const n = this.players.size;
     const seed = (Math.random() * 0xffffffff) >>> 0;
+    this.layout = generateLayout(seed);
+    this.rng = mulberry32(seed ^ 0xbeef);
+    // objective: env override (tests) else a coin flip for variety
+    const forced = process.env.HD_OBJECTIVE as MissionObjective | undefined;
+    const objective: MissionObjective =
+      forced === 'ERADICATE' || forced === 'NESTS' ? forced : Math.random() < 0.5 ? 'NESTS' : 'ERADICATE';
+    const nestHp0 = Number(process.env.HD_NEST_HP) || NEST.hp; // test hook
+    this.nestHp = this.layout.nests.map(() => nestHp0);
     this.mission = {
       phase: 'DROP',
       seed,
+      objective,
       kills: 0,
       killTarget: M.killBase + M.killPerExtraPlayer * (n - 1),
+      nestsLeft: this.layout.nests.length,
+      nestsTotal: this.layout.nests.length,
       reinforceLeft: M.reinforceBase + M.reinforcePerExtraPlayer * (n - 1),
       phaseEndsAt: now + M.dropDurationS * 1000,
     };
-    this.layout = generateLayout(seed);
-    this.rng = mulberry32(seed ^ 0xbeef);
     this.bugs.clear();
     this.projectiles.clear();
+    this.sentries.clear();
+    this.fires.clear();
     this.supplies.clear();
     this.pendingStrats = [];
     this.titanId = 0;
@@ -254,6 +304,8 @@ export class Room {
     p.anim = 0;
     p.pendingReload = false;
     p.kills = 0;
+    p.diveUntil = 0;
+    p.diveReadyAt = 0;
   }
 
   private spawnPoint(index = 0): Vec3 {
@@ -292,14 +344,28 @@ export class Room {
     }
     const dt = Math.max(0.01, (now - p.lastStateAt) / 1000);
     p.lastStateAt = now;
-    const dist = Math.hypot(pos[0] - p.pos[0], pos[2] - p.pos[2]);
-    if (dist <= SPRINT_SPEED * SPEED_TOLERANCE * dt + 0.6) {
-      const [x, z] = resolveCollisions(pos[0], pos[2], PLAYER_RADIUS, this.layout.rocks);
-      p.pos = [x, terrainHeight(this.mission.seed, x, z), z];
+    // the server owns position during a dive; ignore client pos until it ends
+    if (now >= p.diveUntil) {
+      const dist = Math.hypot(pos[0] - p.pos[0], pos[2] - p.pos[2]);
+      if (dist <= SPRINT_SPEED * SPEED_TOLERANCE * dt + 0.6) {
+        const [x, z] = resolveCollisions(pos[0], pos[2], PLAYER_RADIUS, this.layout.rocks);
+        p.pos = [x, terrainHeight(this.mission.seed, x, z), z];
+      }
     }
     p.yaw = yaw;
     p.pitch = Math.max(-1.4, Math.min(1.4, pitch));
     p.anim = (anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD);
+  }
+
+  private handleDive(p: SPlayer, dir: Vec3) {
+    const now = Date.now();
+    if (!p.alive || p.boarded || !this.missionActive()) return;
+    if (now < p.diveReadyAt || now < p.diveUntil) return;
+    const len = Math.hypot(dir[0], dir[2]) || 1;
+    p.diveDx = dir[0] / len;
+    p.diveDz = dir[2] / len;
+    p.diveUntil = now + DIVE.durationS * 1000;
+    p.diveReadyAt = now + DIVE.cooldownS * 1000;
   }
 
   private handleFire(p: SPlayer, origin: Vec3, dir: Vec3) {
@@ -316,13 +382,17 @@ export class Room {
     const off = Math.hypot(origin[0] - eye[0], origin[1] - eye[1], origin[2] - eye[2]);
     const o = off < 3 ? origin : eye;
 
-    const hit = hitscan(p, o, d, this.mission.seed, this.layout, this.bugs.values(), this.players.values());
+    const hit = hitscan(
+      p, o, d, this.mission.seed, this.layout, this.bugs.values(), this.players.values(), this.nestHp,
+    );
     if (hit.kind === 'bug' && hit.bug) {
       hit.bug.hp -= RIFLE.damage;
       hit.bug.aggro = true;
       if (hit.bug.hp <= 0) this.killBug(hit.bug, p);
     } else if (hit.kind === 'player' && hit.player) {
       this.damagePlayer(hit.player, RIFLE.damage); // friendly fire: a Helldivers tradition
+    } else if (hit.kind === 'nest' && hit.nestIndex !== undefined) {
+      this.damageNest(hit.nestIndex, RIFLE.damage);
     }
     this.broadcast({
       type: 'fired',
@@ -384,6 +454,7 @@ export class Room {
 
   private damagePlayer(p: SPlayer, dmg: number) {
     if (!p.alive || p.boarded) return;
+    if (Date.now() < p.diveUntil) return; // i-frames: a well-timed dive dodges
     p.hp -= dmg;
     p.lastDamageAt = Date.now();
     if (p.hp <= 0) {
@@ -405,7 +476,12 @@ export class Room {
     const m = this.mission;
 
     if (m.phase === 'DROP' && now >= m.phaseEndsAt) this.setPhase('KILL');
-    if (m.phase === 'KILL' && m.kills >= m.killTarget) this.setPhase('EXTRACT');
+    if (m.phase === 'KILL') {
+      const done = m.objective === 'NESTS'
+        ? m.nestsTotal > 0 && m.nestsLeft <= 0
+        : m.kills >= m.killTarget;
+      if (done) this.setPhase('EXTRACT');
+    }
     if (m.phase === 'DEFEND' && now >= m.phaseEndsAt) {
       this.setPhase('BOARD', M.boardGraceS);
       const pad = this.layout.pad;
@@ -423,6 +499,8 @@ export class Room {
       this.setPhase('LOBBY');
       this.bugs.clear();
       this.projectiles.clear();
+      this.sentries.clear();
+      this.fires.clear();
       this.supplies.clear();
       this.pendingStrats = [];
       this.titanId = 0;
@@ -452,6 +530,16 @@ export class Room {
 
     if (this.missionActive()) {
       const players = [...this.players.values()];
+
+      // advance any in-progress dives (server-authoritative lunge)
+      for (const p of players) {
+        if (!p.alive || now >= p.diveUntil) continue;
+        const nx = p.pos[0] + p.diveDx * DIVE.speed * dt;
+        const nz = p.pos[2] + p.diveDz * DIVE.speed * dt;
+        const [x, z] = resolveCollisions(nx, nz, PLAYER_RADIUS, this.layout.rocks);
+        p.pos = [x, terrainHeight(m.seed, x, z), z];
+      }
+
       const { attacks, projectiles, stomps } = tickBugs(
         this.bugs.values(), players, m.seed, this.layout, dt, now, this.rng,
       );
@@ -465,6 +553,8 @@ export class Room {
         }
       }
       this.tickProjectiles(dt, now);
+      this.tickSentries(now);
+      this.tickFires(dt, now);
 
       for (const p of players) {
         if (p.pendingReload && now >= p.reloadEndAt) {
@@ -503,6 +593,9 @@ export class Room {
             this.damagePlayer(p, ORBITAL_DAMAGE * (1 - (d / ORBITAL_RADIUS) * 0.6));
           }
         }
+        this.layout.nests.forEach((n, i) => {
+          if (Math.hypot(n.x - s.target[0], n.z - s.target[2]) <= ORBITAL_RADIUS) this.damageNest(i, ORBITAL_DAMAGE);
+        });
       } else if (s.kind === 'RESUPPLY') {
         const id = nextEntityId++;
         this.supplies.set(id, { id, pos: s.target, charges: M.supplyCharges });
@@ -525,13 +618,41 @@ export class Room {
         }
         this.mission.reinforceLeft -= n;
         if (n > 0) this.broadcast({ type: 'reinforced', ids, pos: s.target });
+      } else if (s.kind === 'SENTRY') {
+        const id = nextEntityId++;
+        this.sentries.set(id, {
+          id,
+          x: s.target[0],
+          y: terrainHeight(this.mission.seed, s.target[0], s.target[2]),
+          z: s.target[2],
+          yaw: 0,
+          hp: SENTRY.hp,
+          dieAt: now + SENTRY.lifetimeS * 1000,
+          fireReadyAt: now + 400,
+          owner: s.by,
+        });
+      } else if (s.kind === 'NAPALM') {
+        const id = nextEntityId++;
+        this.fires.set(id, {
+          id,
+          x: s.target[0],
+          z: s.target[2],
+          radius: NAPALM.radius,
+          dieAt: now + NAPALM.durationS * 1000,
+        });
+      } else if (s.kind === 'RECON') {
+        this.broadcast({ type: 'recon', pos: s.target });
       }
     }
   }
 
   private spawnBug() {
-    if (this.layout.nests.length === 0) return;
-    const nestIdx = Math.floor(this.rng() * this.layout.nests.length);
+    // only live nests spew bugs — sealing them stems the tide
+    const live = this.layout.nests
+      .map((_, i) => i)
+      .filter((i) => (this.nestHp[i] ?? 1) > 0);
+    if (live.length === 0) return;
+    const nestIdx = live[Math.floor(this.rng() * live.length)];
     const nest = this.layout.nests[nestIdx];
     const progress = this.mission.killTarget > 0 ? this.mission.kills / this.mission.killTarget : 0;
     const w = spawnWeights(progress);
@@ -593,6 +714,21 @@ export class Room {
     });
   }
 
+  private damageNest(i: number, dmg: number) {
+    if (this.nestHp[i] === undefined || this.nestHp[i] <= 0) return;
+    this.nestHp[i] -= dmg;
+    if (this.nestHp[i] <= 0) {
+      this.nestHp[i] = 0;
+      this.mission.nestsLeft = this.nestHp.filter((h) => h > 0).length;
+      const n = this.layout.nests[i];
+      this.broadcast({
+        type: 'nestDeath',
+        i,
+        pos: [n.x, terrainHeight(this.mission.seed, n.x, n.z), n.z],
+      });
+    }
+  }
+
   private spawnProjectile(ps: ProjSpawn) {
     const id = nextEntityId++;
     this.projectiles.set(id, {
@@ -635,6 +771,55 @@ export class Room {
     }
   }
 
+  private tickSentries(now: number) {
+    for (const s of [...this.sentries.values()]) {
+      if (now >= s.dieAt) {
+        this.sentries.delete(s.id);
+        continue;
+      }
+      // acquire the nearest live bug in range
+      let target: SBug | null = null;
+      let best = SENTRY.range * SENTRY.range;
+      for (const bug of this.bugs.values()) {
+        const d2 = (bug.x - s.x) ** 2 + (bug.z - s.z) ** 2;
+        if (d2 < best) { best = d2; target = bug; }
+      }
+      if (!target) continue;
+      s.yaw = Math.atan2(target.x - s.x, target.z - s.z);
+      if (now < s.fireReadyAt) continue;
+      s.fireReadyAt = now + SENTRY.fireInterval * 1000;
+      const from: Vec3 = [s.x, s.y + 0.9, s.z];
+      const to: Vec3 = [target.x, bugY(this.mission.seed, target), target.z];
+      this.broadcast({ type: 'sentryFire', id: s.id, from, to });
+      target.hp -= SENTRY.damage;
+      target.aggro = true;
+      if (target.hp <= 0) this.killBug(target, this.players.get(s.owner) ?? null);
+    }
+  }
+
+  private tickFires(dt: number, now: number) {
+    for (const f of [...this.fires.values()]) {
+      if (now >= f.dieAt) {
+        this.fires.delete(f.id);
+        continue;
+      }
+      const r2 = f.radius * f.radius;
+      for (const bug of [...this.bugs.values()]) {
+        if ((bug.x - f.x) ** 2 + (bug.z - f.z) ** 2 <= r2) {
+          bug.hp -= NAPALM.dps * dt;
+          bug.aggro = true;
+          if (bug.hp <= 0) this.killBug(bug, null);
+        }
+      }
+      for (const p of this.players.values()) {
+        if (!p.alive || p.boarded) continue;
+        if ((p.pos[0] - f.x) ** 2 + (p.pos[2] - f.z) ** 2 <= r2) {
+          this.damagePlayer(p, NAPALM.dps * dt); // friendly fire: don't stand in the fire
+        }
+      }
+    }
+  }
+
   // ---- networking ----------------------------------------------------------
 
   private playerState(p: SPlayer): PlayerState {
@@ -644,7 +829,7 @@ export class Room {
       pos: [p.pos[0], p.pos[1], p.pos[2]],
       yaw: p.yaw,
       pitch: p.pitch,
-      anim: (p.anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD),
+      anim: (p.anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD) | (Date.now() < p.diveUntil ? ANIM.DIVING : 0),
       hp: Math.round(p.hp),
       ammo: p.ammo,
       reserve: p.reserve,
@@ -680,6 +865,28 @@ export class Room {
       pos: [p.x, p.y, p.z],
       vel: [p.vx, p.vy, p.vz],
     }));
+    const sentries: SentryState[] = [...this.sentries.values()].map((s) => ({
+      id: s.id,
+      pos: [s.x, s.y, s.z],
+      yaw: s.yaw,
+      hp: Math.round(s.hp),
+    }));
+    const fires: FireZoneState[] = [...this.fires.values()].map((f) => ({
+      id: f.id,
+      pos: [f.x, terrainHeight(this.mission.seed, f.x, f.z), f.z],
+      radius: f.radius,
+    }));
+    const nests: NestState[] = [];
+    for (let i = 0; i < this.layout.nests.length; i++) {
+      if ((this.nestHp[i] ?? 0) <= 0) continue;
+      const nst = this.layout.nests[i];
+      nests.push({
+        i,
+        pos: [nst.x, terrainHeight(this.mission.seed, nst.x, nst.z), nst.z],
+        hp: Math.round(this.nestHp[i]),
+        hpMax: NEST.hp,
+      });
+    }
     const titan = this.titanId ? this.bugs.get(this.titanId) : undefined;
     const boss = titan
       ? { id: titan.id, hp: Math.round(titan.hp), hpMax: BUG_KINDS[titan.kind].hp }
@@ -692,6 +899,9 @@ export class Room {
       supplies,
       mission: this.mission,
       projectiles: projectiles.length ? projectiles : undefined,
+      sentries: sentries.length ? sentries : undefined,
+      fires: fires.length ? fires : undefined,
+      nests: nests.length ? nests : undefined,
       boss,
     });
   }

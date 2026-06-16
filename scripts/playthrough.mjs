@@ -19,7 +19,7 @@ const OVERRIDES = {
 };
 
 const server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server/src/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
+  env: { ...process.env, PORT: String(PORT), HD_OBJECTIVE: 'ERADICATE', HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
   stdio: ['ignore', 'ignore', 'inherit'],
   detached: true,
 });

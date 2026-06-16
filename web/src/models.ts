@@ -24,6 +24,7 @@ export interface ModelInstance {
     strafeR?: THREE.AnimationAction; // strafing right
     fire?: THREE.AnimationAction; // additive upper-body firing overlay
     attack?: THREE.AnimationAction; // melee swipe (enemies)
+    dive?: THREE.AnimationAction; // dive/dodge roll
   };
   current?: THREE.AnimationAction;
 }
@@ -175,6 +176,12 @@ export function instantiate(model: LoadedModel, castShadow: boolean): ModelInsta
     }
     const attack = find(/^attack$/i) ?? find(/swip|punch|attack/i);
     if (attack) actions.attack = mixer.clipAction(attack);
+    const dive = find(/^dive$/i) ?? find(/jump|roll|dodge/i);
+    if (dive) {
+      actions.dive = mixer.clipAction(dive);
+      actions.dive.setLoop(THREE.LoopOnce, 1);
+      actions.dive.clampWhenFinished = true;
+    }
     // firing as an additive overlay so the upper body fires while the legs
     // keep running/strafing. Clone per-instance: makeClipAdditive mutates.
     const fire = find(/^fire$/i);
@@ -200,6 +207,7 @@ export function animateInstance(
   dir?: { forward: number; strafe: number },
   firing = false,
   attacking = false,
+  diving = false,
 ) {
   if (dead && !inst.actions.death) {
     // keel forward onto the face (local +X pitch stays face-down at any yaw),
@@ -215,6 +223,8 @@ export function animateInstance(
   let target: THREE.AnimationAction | undefined;
   if (dead) {
     target = a.death ?? a.idle;
+  } else if (diving && a.dive) {
+    target = a.dive;
   } else if (attacking && a.attack) {
     target = a.attack;
   } else if (speed <= 0.7) {
