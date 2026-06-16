@@ -213,7 +213,8 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #btn-fire { right: 26px; bottom: 96px; width: 84px; height: 84px; font-size: 30px; color: var(--red); border-color: rgba(255, 90, 72, 0.6); }
 #btn-reload { right: 126px; bottom: 64px; }
 #btn-sprint { right: 146px; bottom: 150px; }
-#btn-strat { right: 60px; bottom: 200px; }
+#btn-dive { right: 36px; bottom: 186px; color: var(--yellow); border-color: var(--line); }
+#btn-strat { right: 60px; bottom: 256px; }
 #btn-interact { left: 50%; bottom: 30%; transform: translateX(-50%); width: 84px; height: 56px; border-radius: 10px; color: var(--yellow); border-color: var(--line); }
 #strat-pad {
   position: absolute; right: 30px; bottom: 80px;

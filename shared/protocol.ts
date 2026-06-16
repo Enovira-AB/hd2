@@ -12,6 +12,7 @@ export const ANIM = {
   RELOADING: 8,
   DEAD: 16,
   STRAT: 32, // punching in a stratagem code
+  DIVING: 64, // mid dive/dodge roll
 } as const;
 
 export interface PlayerState {
@@ -93,6 +94,7 @@ export type ClientMsg =
   | { type: 'start' }
   | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
+  | { type: 'dive'; dir: Vec3 }
   | { type: 'reload' }
   | { type: 'stratagem'; kind: string; target: Vec3 }
   | { type: 'interact' }

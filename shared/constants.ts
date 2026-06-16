@@ -22,6 +22,10 @@ export const PLAYER_RADIUS = 0.45;
 export const REGEN_DELAY_S = 6;
 export const REGEN_PER_S = 9;
 
+// Dive/dodge roll: a fast server-driven lunge with brief invulnerability —
+// the counter to charger lunges and getting swarmed.
+export const DIVE = { speed: 12.5, durationS: 0.45, cooldownS: 1.3 } as const;
+
 export const RIFLE = {
   damage: 34,
   magSize: 30,

@@ -14,6 +14,7 @@ import {
 import {
   BOSS,
   BUG_KINDS,
+  DIVE,
   MAP_HALF,
   MAX_PLAYERS,
   MISSION,
@@ -170,6 +171,10 @@ export class Room {
       pendingReload: false,
       lastDamageAt: 0,
       lastStateAt: Date.now(),
+      diveUntil: 0,
+      diveReadyAt: 0,
+      diveDx: 0,
+      diveDz: 0,
     };
     this.sockets.set(ws, player);
     this.players.set(id, player);
@@ -212,6 +217,9 @@ export class Room {
         break;
       case 'state':
         this.handleState(player, msg.pos, msg.yaw, msg.pitch, msg.anim);
+        break;
+      case 'dive':
+        this.handleDive(player, msg.dir);
         break;
       case 'fire':
         this.handleFire(player, msg.origin, msg.dir);
@@ -280,6 +288,8 @@ export class Room {
     p.anim = 0;
     p.pendingReload = false;
     p.kills = 0;
+    p.diveUntil = 0;
+    p.diveReadyAt = 0;
   }
 
   private spawnPoint(index = 0): Vec3 {
@@ -318,14 +328,28 @@ export class Room {
     }
     const dt = Math.max(0.01, (now - p.lastStateAt) / 1000);
     p.lastStateAt = now;
-    const dist = Math.hypot(pos[0] - p.pos[0], pos[2] - p.pos[2]);
-    if (dist <= SPRINT_SPEED * SPEED_TOLERANCE * dt + 0.6) {
-      const [x, z] = resolveCollisions(pos[0], pos[2], PLAYER_RADIUS, this.layout.rocks);
-      p.pos = [x, terrainHeight(this.mission.seed, x, z), z];
+    // the server owns position during a dive; ignore client pos until it ends
+    if (now >= p.diveUntil) {
+      const dist = Math.hypot(pos[0] - p.pos[0], pos[2] - p.pos[2]);
+      if (dist <= SPRINT_SPEED * SPEED_TOLERANCE * dt + 0.6) {
+        const [x, z] = resolveCollisions(pos[0], pos[2], PLAYER_RADIUS, this.layout.rocks);
+        p.pos = [x, terrainHeight(this.mission.seed, x, z), z];
+      }
     }
     p.yaw = yaw;
     p.pitch = Math.max(-1.4, Math.min(1.4, pitch));
     p.anim = (anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD);
+  }
+
+  private handleDive(p: SPlayer, dir: Vec3) {
+    const now = Date.now();
+    if (!p.alive || p.boarded || !this.missionActive()) return;
+    if (now < p.diveReadyAt || now < p.diveUntil) return;
+    const len = Math.hypot(dir[0], dir[2]) || 1;
+    p.diveDx = dir[0] / len;
+    p.diveDz = dir[2] / len;
+    p.diveUntil = now + DIVE.durationS * 1000;
+    p.diveReadyAt = now + DIVE.cooldownS * 1000;
   }
 
   private handleFire(p: SPlayer, origin: Vec3, dir: Vec3) {
@@ -410,6 +434,7 @@ export class Room {
 
   private damagePlayer(p: SPlayer, dmg: number) {
     if (!p.alive || p.boarded) return;
+    if (Date.now() < p.diveUntil) return; // i-frames: a well-timed dive dodges
     p.hp -= dmg;
     p.lastDamageAt = Date.now();
     if (p.hp <= 0) {
@@ -480,6 +505,16 @@ export class Room {
 
     if (this.missionActive()) {
       const players = [...this.players.values()];
+
+      // advance any in-progress dives (server-authoritative lunge)
+      for (const p of players) {
+        if (!p.alive || now >= p.diveUntil) continue;
+        const nx = p.pos[0] + p.diveDx * DIVE.speed * dt;
+        const nz = p.pos[2] + p.diveDz * DIVE.speed * dt;
+        const [x, z] = resolveCollisions(nx, nz, PLAYER_RADIUS, this.layout.rocks);
+        p.pos = [x, terrainHeight(m.seed, x, z), z];
+      }
+
       const { attacks, projectiles, stomps } = tickBugs(
         this.bugs.values(), players, m.seed, this.layout, dt, now, this.rng,
       );
@@ -747,7 +782,7 @@ export class Room {
       pos: [p.pos[0], p.pos[1], p.pos[2]],
       yaw: p.yaw,
       pitch: p.pitch,
-      anim: (p.anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD),
+      anim: (p.anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD) | (Date.now() < p.diveUntil ? ANIM.DIVING : 0),
       hp: Math.round(p.hp),
       ammo: p.ammo,
       reserve: p.reserve,

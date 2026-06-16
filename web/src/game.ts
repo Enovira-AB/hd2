@@ -17,7 +17,7 @@ import {
 } from './models.js';
 import { ANIM, BUGFLAG, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
-  MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
+  DIVE, MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
   type StratagemKind,
 } from '../../shared/constants.js';
 import { resolveCollisions } from '../../shared/world.js';
@@ -90,6 +90,10 @@ export class Game {
   private localAmmo: number = RIFLE.magSize;
   private localReserve: number = RIFLE.reserveMax;
   private reloadUntil = 0;
+  private diveUntil = 0;
+  private diveReadyAt = 0;
+  private diveDx = 0;
+  private diveDz = 0;
   private nextFireAt = 0;
   private lastStateSent = 0;
   private stratSeq = '';
@@ -378,6 +382,7 @@ export class Game {
     });
 
     this.updateStratagemInput();
+    this.tryDive();
     this.updateMovement(dt);
     this.updateCamera(dt, time);
     this.updateCombat();
@@ -442,9 +447,46 @@ export class Game {
     this.hud.banner(STRATAGEMS[kind].label.toUpperCase(), 'STRATAGEM INBOUND', 1600);
   }
 
+  private tryDive() {
+    if (!this.input.consumeDive()) return;
+    const now = performance.now();
+    if (!this.alive || this.boarded || !this.active()) return;
+    if (now < this.diveReadyAt || now < this.diveUntil) return;
+    // dive in the movement direction, or facing if standing still
+    let dx = Math.sin(this.yaw);
+    let dz = Math.cos(this.yaw);
+    if (Math.abs(this.input.moveX) + Math.abs(this.input.moveY) > 0.1) {
+      const f = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0));
+      const wish = f.multiplyScalar(this.input.moveY).addScaledVector(r, this.input.moveX);
+      if (wish.lengthSq() > 0.01) {
+        wish.normalize();
+        dx = wish.x;
+        dz = wish.z;
+      }
+    }
+    this.diveDx = dx;
+    this.diveDz = dz;
+    this.diveUntil = now + DIVE.durationS * 1000;
+    this.diveReadyAt = now + DIVE.cooldownS * 1000;
+    this.net.send({ type: 'dive', dir: [dx, 0, dz] });
+    this.fx.addShake(0.12);
+  }
+
   private updateMovement(dt: number) {
     if (!this.alive || this.boarded || !this.active()) {
       this.vel.set(0, 0, 0);
+      return;
+    }
+    // predict the server-driven dive lunge so it feels instant
+    if (performance.now() < this.diveUntil) {
+      this.vel.set(this.diveDx * DIVE.speed, 0, this.diveDz * DIVE.speed);
+      this.pos.x += this.diveDx * DIVE.speed * dt;
+      this.pos.z += this.diveDz * DIVE.speed * dt;
+      const [dx, dz] = resolveCollisions(this.pos.x, this.pos.z, 0.45, this.world.layout.rocks);
+      this.pos.x = dx;
+      this.pos.z = dz;
+      this.pos.y = this.world.terrainY(dx, dz);
       return;
     }
     const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
@@ -659,7 +701,7 @@ export class Game {
           const fwd = this.vel.x * Math.sin(this.yaw) + this.vel.z * Math.cos(this.yaw);
           const lat = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
           animateInstance(view.custom, dt, view.speed, !this.alive, { forward: fwd, strafe: lat },
-            this.input.fireHeld && this.alive);
+            this.input.fireHeld && this.alive, false, performance.now() < this.diveUntil);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: view.speed,
@@ -682,7 +724,7 @@ export class Game {
           const fwd = wvx * Math.sin(p.yaw) + wvz * Math.cos(p.yaw);
           const lat = wvx * Math.cos(p.yaw) - wvz * Math.sin(p.yaw);
           animateInstance(view.custom, dt, Math.min(view.speed, 9), dead, { forward: fwd, strafe: lat },
-            (p.anim & ANIM.FIRING) !== 0);
+            (p.anim & ANIM.FIRING) !== 0, false, (p.anim & ANIM.DIVING) !== 0);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: Math.min(view.speed, 9),

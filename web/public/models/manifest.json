@@ -8,6 +8,7 @@
       "rifle_run": "anims/rifle_run.glb",
       "fire": "anims/fire.glb",
       "death": "anims/death.glb",
+      "dive": "anims/jump_fwd.glb",
       "back": "anims/run_back.glb",
       "strafe": "anims/strafe.glb",
       "strafe_r": "anims/strafe_r.glb"

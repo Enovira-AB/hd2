@@ -32,6 +32,10 @@ export interface SPlayer {
   pendingReload: boolean;
   lastDamageAt: number;
   lastStateAt: number;
+  diveUntil: number; // server-driven dive in progress until this clock time
+  diveReadyAt: number; // cooldown
+  diveDx: number;
+  diveDz: number;
 }
 
 export interface SBug {

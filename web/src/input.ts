@@ -16,6 +16,7 @@ export class Input {
   private arrowQueue: string[] = [];
   private reloadEdge = false;
   private interactEdge = false;
+  private diveEdge = false;
   private canvas: HTMLCanvasElement;
   private stickId = -1;
   private lookId = -1;
@@ -42,6 +43,11 @@ export class Input {
   consumeInteract(): boolean {
     const r = this.interactEdge;
     this.interactEdge = false;
+    return r;
+  }
+  consumeDive(): boolean {
+    const r = this.diveEdge;
+    this.diveEdge = false;
     return r;
   }
   consumeLook(): { dx: number; dy: number } {
@@ -76,6 +82,7 @@ export class Input {
       if (k === 'Escape') this.stratOpen = false;
       if (k === 'KeyR') this.reloadEdge = true;
       if (k === 'KeyE' || k === 'KeyF') this.interactEdge = true;
+      if (k === 'Space') { this.diveEdge = true; e.preventDefault(); }
       this.refreshMove();
     });
     window.addEventListener('keyup', (e) => {
@@ -210,6 +217,7 @@ export class Input {
     hold('btn-fire', () => (this.fireHeld = true), () => (this.fireHeld = false));
     hold('btn-reload', () => (this.reloadEdge = true));
     hold('btn-sprint', () => (this.sprint = !this.sprint));
+    hold('btn-dive', () => (this.diveEdge = true));
     hold('btn-interact', () => (this.interactEdge = true));
     hold('btn-strat', () => {
       this.stratOpen = !this.stratOpen;
