@@ -1,7 +1,7 @@
 {
   "_comment": "Drop-in GLB models replace the procedural ones. Value = filename, or { file, yaw, height }. yaw rotates a model that faces the wrong way (try 3.14159). Keys: soldier, bug0 scavenger, bug1 warrior, bug2 spitter, bug3 charger, bug4 titan. null = procedural. See README.md.",
   "soldier": {
-    "file": "soldier.glb",
+    "file": "vanguard.glb",
     "yaw": 0,
     "anims": {
       "rifle_idle": "anims/rifle_idle.glb",
@@ -14,7 +14,15 @@
     }
   },
   "bug0": null,
-  "bug1": null,
+  "bug1": {
+    "file": "maw.glb",
+    "height": 1.9,
+    "anims": {
+      "idle": "anims/mutant_idle.glb",
+      "run": "anims/mutant_run.glb",
+      "attack": "anims/mutant_swipe.glb"
+    }
+  },
   "bug2": null,
   "bug3": {
     "file": "warrok.glb",

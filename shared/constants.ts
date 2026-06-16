@@ -78,10 +78,10 @@ export function spawnWeights(progress: number): number[] {
   // scavenger, warrior, spitter, charger  (titan never spawns from the pool)
   const t = Math.max(0, Math.min(1, progress));
   return [
-    0.62 - 0.22 * t, // scavengers thin out as it heats up
-    0.26 + 0.04 * t,
-    0.08 + 0.10 * t, // more spitters later
-    0.04 + 0.08 * t, // more chargers later
+    0.46 - 0.20 * t, // scavengers thin out as it heats up
+    0.24, // warrior (Maw)
+    0.10 + 0.06 * t, // more spitters later
+    0.20 + 0.14 * t, // charger (Warrok) — weighted up so the brute actually shows
   ];
 }
 

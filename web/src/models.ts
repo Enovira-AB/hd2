@@ -202,10 +202,12 @@ export function animateInstance(
   attacking = false,
 ) {
   if (dead && !inst.actions.death) {
-    // no death clip: keel over like the procedural rig does
-    inst.group.rotation.z += (1.5 - inst.group.rotation.z) * Math.min(1, dt * 5);
-  } else if (!dead && inst.group.rotation.z !== 0) {
-    inst.group.rotation.z += (0 - inst.group.rotation.z) * Math.min(1, dt * 10);
+    // keel forward onto the face (local +X pitch stays face-down at any yaw),
+    // never onto the side (rotation.z roll looked like lying sideways)
+    inst.group.rotation.x += (1.4 - inst.group.rotation.x) * Math.min(1, dt * 5);
+  } else if (!dead) {
+    if (inst.group.rotation.x !== 0) inst.group.rotation.x += (0 - inst.group.rotation.x) * Math.min(1, dt * 10);
+    if (inst.group.rotation.z !== 0) inst.group.rotation.z += (0 - inst.group.rotation.z) * Math.min(1, dt * 10);
   }
   if (!inst.mixer) return;
   const a = inst.actions;

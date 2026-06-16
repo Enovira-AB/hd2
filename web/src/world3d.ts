@@ -103,21 +103,22 @@ export class World3D {
       powerPreference: 'high-performance',
     });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.5;
     this.renderer.shadowMap.enabled = !mobile;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05070c);
-    this.scene.fog = new THREE.FogExp2(0x0a0e16, 0.0145);
+    this.scene.background = new THREE.Color(0x0a0f18);
+    this.scene.fog = new THREE.FogExp2(0x141c2a, 0.009);
 
     this.camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1200);
     this.camera.position.set(0, 3, 8);
 
-    const hemi = new THREE.HemisphereLight(0x2a3a5f, 0x0b0d10, 0.38);
+    // brighter moonlit night: lifted ambient + key so the action reads clearly
+    const hemi = new THREE.HemisphereLight(0x4a5f88, 0x1a2230, 0.85);
     this.scene.add(hemi);
 
-    this.moon = new THREE.DirectionalLight(0x9fb6e8, 0.72);
+    this.moon = new THREE.DirectionalLight(0xb9c8ec, 1.25);
     this.moon.position.set(40, 70, 25);
     if (!mobile) {
       this.moon.castShadow = true;
