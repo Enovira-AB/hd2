@@ -121,6 +121,7 @@ input.enabled = true;
 
 const menuCam = { angle: 0 };
 let last = performance.now();
+let gameTime = 0; // advances at the (hitstop/slow-mo) scaled rate
 
 function frame(nowMs: number) {
   requestAnimationFrame(frame);
@@ -129,8 +130,11 @@ function frame(nowMs: number) {
   const time = nowMs / 1000;
 
   if (inGame && net.mission) {
-    game.update(dt, time);
-    world.update(dt, time, game.pos);
+    // hitstop/slow-mo scale gameplay (and its own clock) but not the UI/effects
+    const gdt = dt * effects.timeScale();
+    gameTime += gdt;
+    game.update(gdt, gameTime);
+    world.update(gdt, gameTime, game.pos);
   } else {
     // slow cinematic orbit for menu / lobby backdrop
     menuCam.angle += dt * 0.045;

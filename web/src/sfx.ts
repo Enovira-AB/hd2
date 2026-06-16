@@ -31,6 +31,7 @@ export class Sfx {
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
     this.startWind();
+    this.startMusic();
   }
 
   private env(gain: GainNode, t0: number, peak: number, decay: number) {
@@ -108,6 +109,12 @@ export class Sfx {
     this.playOsc('sine', 95, 60, 0.3, 0.18);
   }
 
+  // wet gib burst when a bug pops
+  squelch(volume = 1) {
+    this.playNoise('lowpass', 900, 180, 0.32 * volume, 0.14);
+    this.playNoise('bandpass', 1500, 400, 0.13 * volume, 0.1);
+  }
+
   beep(ok = false) {
     this.playOsc('square', ok ? 1318 : 980, ok ? 1318 : 980, 0.12, 0.07);
   }
@@ -134,6 +141,51 @@ export class Sfx {
     if (!this.ctx || !this.tensionGain) return;
     const v = Math.max(0, Math.min(1, level));
     this.tensionGain.gain.setTargetAtTime(v * 0.06, this.ctx.currentTime, 0.4);
+  }
+
+  // Driving combat pulse (kick + brooding bass riff), gain tracks threat.
+  private musicGain: GainNode | null = null;
+  private musicTimer: ReturnType<typeof setInterval> | undefined;
+  private beat = 0;
+  setMusic(level: number) {
+    if (!this.ctx || !this.musicGain) return;
+    this.musicGain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.2, this.ctx.currentTime, 0.6);
+  }
+
+  private startMusic() {
+    if (!this.ctx || !this.master) return;
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0;
+    this.musicGain.connect(this.master);
+    const bassNotes = [55, 55, 65.41, 49]; // A1 A1 C2 G1 — minor, brooding
+    this.musicTimer = setInterval(() => {
+      if (!this.ctx || !this.musicGain) return;
+      const t = this.ctx.currentTime + 0.02;
+      const kick = this.ctx.createOscillator();
+      const kg = this.ctx.createGain();
+      kick.frequency.setValueAtTime(125, t);
+      kick.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      kg.gain.setValueAtTime(0.9, t);
+      kg.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      kick.connect(kg).connect(this.musicGain);
+      kick.start(t);
+      kick.stop(t + 0.2);
+      if (this.beat % 2 === 0) {
+        const bass = this.ctx.createOscillator();
+        bass.type = 'sawtooth';
+        bass.frequency.value = bassNotes[(this.beat / 2) % bassNotes.length];
+        const bf = this.ctx.createBiquadFilter();
+        bf.type = 'lowpass';
+        bf.frequency.value = 280;
+        const bg = this.ctx.createGain();
+        bg.gain.setValueAtTime(0.5, t);
+        bg.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+        bass.connect(bf).connect(bg).connect(this.musicGain);
+        bass.start(t);
+        bass.stop(t + 0.5);
+      }
+      this.beat++;
+    }, 500);
   }
 
   private startWind() {

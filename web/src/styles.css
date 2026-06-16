@@ -120,6 +120,11 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
   transition: opacity 0.05s;
 }
 #hitmarker.show { opacity: 1; }
+#hitmarker.kill {
+  width: 30px; height: 30px;
+  border-color: var(--red);
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.25);
+}
 
 #damage-vignette {
   position: absolute; inset: 0;

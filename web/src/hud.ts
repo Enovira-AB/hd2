@@ -122,10 +122,11 @@ export class Hud {
     this.bannerTimer = window.setTimeout(() => el('center-banner').classList.add('hidden'), ms);
   }
 
-  hitmarker() {
+  hitmarker(kill = false) {
     const h = el('hitmarker');
+    h.classList.toggle('kill', kill);
     h.classList.add('show');
-    setTimeout(() => h.classList.remove('show'), 90);
+    setTimeout(() => h.classList.remove('show'), kill ? 160 : 90);
   }
 
   damageFlash(strength = 0.8) {

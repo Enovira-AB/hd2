@@ -166,8 +166,25 @@ export class Game {
     n.on('bugDeath', (m) => {
       if (m.type !== 'bugDeath') return;
       const pos = new THREE.Vector3(...m.pos);
+      const dist = this.pos.distanceTo(pos);
       this.fx.bugCorpse(pos, m.kind);
-      this.sfx.screech(Math.max(0.1, 1 - this.pos.distanceTo(pos) / 60));
+      this.sfx.screech(Math.max(0.1, 1 - dist / 60));
+      this.sfx.squelch(Math.max(0.1, 1 - dist / 40));
+      const mine = m.by === n.selfId;
+      if (m.kind === 4) {
+        // titan death: a real moment — slow-mo, a blast and a hit-stop
+        this.fx.explosion(pos, 9, this.world.camera.position);
+        this.fx.requestSlowmo(900, 0.3);
+        this.fx.requestHitstop(80);
+        this.fx.addShake(0.8);
+        this.sfx.explosion(Math.max(0.3, 1 - dist / 120));
+        this.hud.banner('TITAN DOWN', 'FOR SUPER EARTH', 2600);
+      } else if (mine) {
+        // your kill: a marker always; a hit-stop only on heavies (a swarm of
+        // scavenger hit-stops would feel laggy)
+        if (m.kind === 1 || m.kind === 3) this.fx.requestHitstop(50);
+        this.hud.hitmarker(true);
+      }
       const view = this.bugViews.get(m.id);
       if (view) {
         this.world.scene.remove(view.group);
@@ -408,7 +425,9 @@ export class Game {
     for (const v of this.bugViews.values()) {
       if (v.group.position.distanceTo(this.pos) < 22) near++;
     }
-    this.sfx.setTension(this.alive ? Math.min(1, near / 8) : 0);
+    const threat = this.alive ? Math.min(1, near / 8) : 0;
+    this.sfx.setTension(threat);
+    this.sfx.setMusic(this.active() ? 0.35 + threat * 0.65 : 0);
     this.updateHud();
     this.sendState();
   }

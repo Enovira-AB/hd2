@@ -82,6 +82,29 @@ export class Effects {
     this.trauma = Math.min(1, this.trauma + amount);
   }
 
+  // ---- time control (hitstop / slow-mo) --------------------------------------
+  // gameplay dt is multiplied by timeScale(); both count down in real time.
+
+  private hitstopUntil = 0;
+  private slowmoUntil = 0;
+  private slowmoScale = 1;
+
+  requestHitstop(ms = 45) {
+    this.hitstopUntil = Math.max(this.hitstopUntil, performance.now() + ms);
+  }
+
+  requestSlowmo(ms: number, scale = 0.35) {
+    this.slowmoUntil = performance.now() + ms;
+    this.slowmoScale = scale;
+  }
+
+  timeScale(): number {
+    const now = performance.now();
+    if (now < this.hitstopUntil) return 0.03;
+    if (now < this.slowmoUntil) return this.slowmoScale;
+    return 1;
+  }
+
   shakeOffset(time: number, out: THREE.Vector3): number {
     const s = this.trauma * this.trauma;
     out.set(
@@ -467,7 +490,62 @@ export class Effects {
       },
     };
     this.corpses.push(entry);
-    this.burst(pos, 18, 0x9aff66, 5, 0.6, 0.12);
+    this.gore(pos, kind);
+  }
+
+  // Flying chunks + a blood spray + a lingering ground splat, scaled by enemy.
+  gore(pos: THREE.Vector3, kind: number) {
+    const big = kind === 1 || kind === 3;
+    const titan = kind === 4;
+    const scale = titan ? 3 : big ? 1.5 : 1;
+    const green = 0x9aff3a;
+
+    this.burst(pos, titan ? 40 : 22, green, 6 * scale, 0.7, 0.13 * scale);
+
+    // chunks: small dark-green shards flung out with gravity, then they fade
+    const n = this.mobile ? 4 : titan ? 14 : big ? 8 : 5;
+    for (let i = 0; i < n; i++) {
+      const chunk = new THREE.Mesh(
+        new THREE.TetrahedronGeometry((0.08 + Math.random() * 0.12) * scale),
+        new THREE.MeshStandardMaterial({ color: 0x2c3a16, roughness: 0.8, flatShading: true }),
+      );
+      chunk.position.copy(pos).add(new THREE.Vector3(0, 0.3 * scale, 0));
+      const a = Math.random() * Math.PI * 2;
+      const e = 0.3 + Math.random() * 0.9;
+      const sp = (3 + Math.random() * 4) * scale;
+      const vel = new THREE.Vector3(Math.cos(a) * Math.cos(e), Math.sin(e) * 1.4, Math.sin(a) * Math.cos(e)).multiplyScalar(sp);
+      const spin = new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
+      const groundY = pos.y - 0.2;
+      this.scene.add(chunk);
+      this.timed.push({
+        obj: chunk, age: 0, ttl: 1.6 + Math.random() * 0.8,
+        tick: (t) => {
+          const dt = 0.016;
+          vel.y -= 16 * dt;
+          chunk.position.addScaledVector(vel, dt);
+          if (chunk.position.y < groundY) { chunk.position.y = groundY; vel.set(0, 0, 0); }
+          chunk.rotation.x += spin.x * dt;
+          chunk.rotation.y += spin.y * dt;
+          if (t > 0.7) (chunk.material as THREE.MeshStandardMaterial).transparent = true;
+          if (t > 0.7) (chunk.material as THREE.MeshStandardMaterial).opacity = (1 - t) / 0.3;
+        },
+      });
+    }
+
+    // ground gore splat (additive green decal)
+    const splat = new THREE.Mesh(
+      new THREE.CircleGeometry((0.7 + Math.random() * 0.5) * scale, 12).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0x4aff1a, transparent: true, opacity: 0.5, depthWrite: false,
+        blending: THREE.AdditiveBlending, fog: false,
+      }),
+    );
+    splat.position.set(pos.x, pos.y - 0.18, pos.z);
+    this.scene.add(splat);
+    this.timed.push({
+      obj: splat, age: 0, ttl: titan ? 8 : 4,
+      tick: (t) => { (splat.material as THREE.MeshBasicMaterial).opacity = 0.5 * (1 - t); },
+    });
   }
 
   // ---- acid projectiles --------------------------------------------------------------

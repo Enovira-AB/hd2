@@ -142,7 +142,7 @@ export type ServerMsg =
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
   | { type: 'sentryFire'; id: number; from: Vec3; to: Vec3 } // turret tracer
   | { type: 'recon'; pos: Vec3 } // recon pulse ping (clients reveal nearby bugs)
-  | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
+  | { type: 'bugDeath'; id: number; pos: Vec3; kind: number; by?: string } // by = killer player id
   | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
   | { type: 'nestDeath'; i: number; pos: Vec3 } // a nest was sealed/destroyed
   | { type: 'boss'; pos: Vec3 } // titan arrival

@@ -711,6 +711,7 @@ export class Room {
       id: bug.id,
       pos: [bug.x, bugY(this.mission.seed, bug), bug.z],
       kind: bug.kind,
+      by: killer?.id,
     });
   }
 
