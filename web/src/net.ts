@@ -6,6 +6,7 @@ import type {
   ClientMsg,
   MissionState,
   PlayerState,
+  ProjectileState,
   ServerMsg,
   SupplyState,
 } from '../../shared/protocol.js';
@@ -34,6 +35,9 @@ export class Net {
   mission: MissionState | null = null;
   latestPlayers: PlayerState[] = [];
   latestSupplies: SupplyState[] = [];
+  latestProjectiles: ProjectileState[] = [];
+  latestSnapT = 0; // server clock (ms) of the most recent snapshot
+  boss: { id: number; hp: number; hpMax: number } | null = null;
   connected = false;
 
   on(type: ServerMsg['type'], fn: Handler) {
@@ -91,6 +95,9 @@ export class Net {
         this.mission = msg.mission;
         this.latestPlayers = msg.players;
         this.latestSupplies = msg.supplies;
+        this.latestProjectiles = msg.projectiles ?? [];
+        this.boss = msg.boss ?? null;
+        this.latestSnapT = msg.t;
         break;
       case 'phase':
         this.mission = msg.mission;

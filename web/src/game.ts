@@ -15,9 +15,9 @@ import {
   animateInstance, findNode, getBugModel, getSoldierModel, instantiate,
   type ModelInstance,
 } from './models.js';
-import { ANIM, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
+import { ANIM, BUGFLAG, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
-  MISSION, ORBITAL_RADIUS, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
+  MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
   type StratagemKind,
 } from '../../shared/constants.js';
 import { resolveCollisions } from '../../shared/world.js';
@@ -196,6 +196,20 @@ export class Game {
       }
     });
 
+    n.on('splat', (m) => {
+      if (m.type !== 'splat') return;
+      const pos = new THREE.Vector3(...m.pos);
+      this.fx.acidSplat(pos, m.kind);
+      this.sfx.impact(Math.max(0.15, 1 - this.pos.distanceTo(pos) / 50));
+    });
+
+    n.on('boss', (m) => {
+      if (m.type !== 'boss') return;
+      this.hud.banner('⚠ BILE TITAN', 'A TERMINID BEHEMOTH APPROACHES', 3600);
+      this.fx.addShake(0.6);
+      this.sfx.screech(1);
+    });
+
     n.on('reinforced', (m) => {
       if (m.type !== 'reinforced') return;
       if (m.ids.includes(n.selfId)) {
@@ -318,6 +332,7 @@ export class Game {
     this.updateCombat();
     this.updateInteract();
     this.reconcileViews(dt, time);
+    this.updateProjectilesAndBoss();
     this.updateHud();
     this.sendState();
   }
@@ -582,7 +597,11 @@ export class Game {
         view.group.rotation.y = this.yaw;
         view.speed = this.vel.length();
         if (view.custom) {
-          animateInstance(view.custom, dt, view.speed, !this.alive);
+          // velocity in the soldier's local frame -> directional animation
+          const fwd = this.vel.x * Math.sin(this.yaw) + this.vel.z * Math.cos(this.yaw);
+          const lat = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
+          animateInstance(view.custom, dt, view.speed, !this.alive, { forward: fwd, strafe: lat },
+            this.input.fireHeld && this.alive);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: view.speed,
@@ -595,12 +614,17 @@ export class Game {
         view.flashlight.intensity = this.alive ? 320 : 0;
       } else {
         const target = new THREE.Vector3(...p.pos);
+        const wvx = (target.x - view.lastPos.x) / Math.max(dt, 1e-3);
+        const wvz = (target.z - view.lastPos.z) / Math.max(dt, 1e-3);
         view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
         view.lastPos.copy(target);
         view.group.position.copy(target);
         view.group.rotation.y = p.yaw;
         if (view.custom) {
-          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead);
+          const fwd = wvx * Math.sin(p.yaw) + wvz * Math.cos(p.yaw);
+          const lat = wvx * Math.cos(p.yaw) - wvz * Math.sin(p.yaw);
+          animateInstance(view.custom, dt, Math.min(view.speed, 9), dead, { forward: fwd, strafe: lat },
+            (p.anim & ANIM.FIRING) !== 0);
         } else if (view.rig) {
           animateSoldier(view.rig, dt, {
             speed: Math.min(view.speed, 9),
@@ -639,13 +663,20 @@ export class Game {
         this.world.scene.add(view.group);
         this.bugViews.set(b.id, view);
       }
-      const target = new THREE.Vector3(b.pos[0], b.pos[1] - 0.42, b.pos[2]);
+      // procedural rigs sit with their body raised (-0.42 tuning); GLB models
+      // are normalized feet-at-0, so plant them on the terrain instead.
+      const groundY = this.world.terrainY(b.pos[0], b.pos[2]);
+      const target = new THREE.Vector3(b.pos[0], view.custom ? groundY : b.pos[1] - 0.42, b.pos[2]);
       view.speed = view.speed * 0.8 + (target.distanceTo(view.lastPos) / Math.max(dt, 1e-3)) * 0.2;
       view.lastPos.copy(target);
       view.group.position.copy(target);
       view.group.rotation.y = b.yaw;
-      if (view.custom) animateInstance(view.custom, dt, Math.min(view.speed, 8), false);
-      else if (view.rig) animateBug(view.rig, dt, Math.min(view.speed, 8), time);
+      if (view.custom) {
+        const attacking = ((b.flags ?? 0) & BUGFLAG.WINDUP) !== 0;
+        animateInstance(view.custom, dt, Math.min(view.speed, 8), false, undefined, false, attacking);
+      } else if (view.rig) {
+        animateBug(view.rig, dt, Math.min(view.speed, 8), time);
+      }
     }
     for (const [id, view] of this.bugViews) {
       if (!seenBugs.has(id)) {
@@ -683,6 +714,23 @@ export class Game {
         this.supplyViews.delete(id);
       }
     }
+  }
+
+  // Extrapolate acid globs from the last snapshot (they move fast for the
+  // 15Hz stream) and refresh the boss healthbar.
+  private updateProjectilesAndBoss() {
+    const dt = Math.max(0, (this.net.serverNow() - this.net.latestSnapT) / 1000);
+    const list = this.net.latestProjectiles.map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      pos: [
+        p.pos[0] + p.vel[0] * dt,
+        p.pos[1] + p.vel[1] * dt - 0.5 * PROJECTILE.gravity * dt * dt,
+        p.pos[2] + p.vel[2] * dt,
+      ] as [number, number, number],
+    }));
+    this.fx.syncProjectiles(list);
+    this.hud.setBoss(this.net.boss);
   }
 
   // ---- HUD + state -------------------------------------------------------------------

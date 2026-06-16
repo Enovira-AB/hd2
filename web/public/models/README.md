@@ -1,14 +1,24 @@
 # Drop-in 3D models
 
-Put GLB files here and the game uses them instead of the procedural
-primitives — no code changes, no rebuild needed in dev. Missing files fall
-back to procedural automatically.
+Put a GLB file here, then list it in `manifest.json`, and the game uses it
+instead of the procedural primitive. Anything left `null` keeps the procedural
+look — and because the loader only requests what the manifest lists, there are
+**no failed network requests** for absent models.
 
-| File | Replaces | Normalized to |
+```jsonc
+// manifest.json
+{
+  "soldier": "soldier.glb",  // or null for the procedural helldiver
+  "bug0": null,              // scavenger (small bug)
+  "bug1": null               // warrior (big bug)
+}
+```
+
+| Manifest key | Replaces | Normalized to |
 |---|---|---|
-| `soldier.glb` | all helldivers | 1.95 m tall |
-| `bug0.glb` | scavenger (small bug) | 0.95 m |
-| `bug1.glb` | warrior (big bug) | 1.55 m |
+| `soldier` | all helldivers | 1.95 m tall |
+| `bug0` | scavenger (small bug) | 0.95 m |
+| `bug1` | warrior (big bug) | 1.55 m |
 
 ## Requirements
 
@@ -33,8 +43,9 @@ curl -L -o web/public/models/soldier.glb \
   https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/Soldier.glb
 ```
 
-That model is a Mixamo character shipped with the three.js examples — fine
-for prototyping; swap it for a properly licensed asset before any release.
+Then set `"soldier": "soldier.glb"` in `manifest.json` and reload. That model
+is a Mixamo character shipped with the three.js examples — fine for
+prototyping; swap it for a properly licensed asset before any release.
 
 ## Where to get good free assets
 

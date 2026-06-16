@@ -34,6 +34,19 @@ export interface BugState {
   pos: Vec3;
   yaw: number;
   hp: number;
+  flags?: number; // BUGFLAG bits (windup/charging), omitted when 0
+}
+
+export const BUGFLAG = {
+  WINDUP: 1, // charger telegraphing a lunge
+  CHARGING: 2, // charger mid-lunge
+} as const;
+
+export interface ProjectileState {
+  id: number;
+  kind: number; // 0 acid glob (spitter), 1 bile (titan)
+  pos: Vec3;
+  vel: Vec3; // lets clients extrapolate between snapshots
 }
 
 export interface SupplyState {
@@ -93,9 +106,13 @@ export type ServerMsg =
       bugs: BugState[];
       supplies: SupplyState[];
       mission: MissionState;
+      projectiles?: ProjectileState[]; // omitted when none in flight
+      boss?: { id: number; hp: number; hpMax: number } | null; // titan healthbar
     }
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
   | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
+  | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
+  | { type: 'boss'; pos: Vec3 } // titan arrival
   | { type: 'hit'; id: string; hp: number } // a player took damage
   | { type: 'down'; id: string }
   | { type: 'strat'; id: string; kind: string; target: Vec3; at: number } // impact at server time

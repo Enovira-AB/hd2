@@ -88,7 +88,39 @@ function drawIcon(size) {
   });
 }
 
+// Wrap one or more PNGs into a single .ico container (ICO supports embedded
+// PNG entries, which every modern browser reads). Kills the browser's
+// automatic /favicon.ico probe that otherwise 404s.
+function ico(entries) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // type: 1 = icon
+  header.writeUInt16LE(entries.length, 4);
+  const dir = [];
+  const images = [];
+  let offset = 6 + entries.length * 16;
+  for (const { size, png } of entries) {
+    const e = Buffer.alloc(16);
+    e.writeUInt8(size >= 256 ? 0 : size, 0); // width (0 means 256)
+    e.writeUInt8(size >= 256 ? 0 : size, 1); // height
+    e.writeUInt8(0, 2); // palette count
+    e.writeUInt8(0, 3); // reserved
+    e.writeUInt16LE(1, 4); // color planes
+    e.writeUInt16LE(32, 6); // bits per pixel
+    e.writeUInt32LE(png.length, 8);
+    e.writeUInt32LE(offset, 12);
+    dir.push(e);
+    images.push(png);
+    offset += png.length;
+  }
+  return Buffer.concat([header, ...dir, ...images]);
+}
+
 mkdirSync('web/public', { recursive: true });
 writeFileSync('web/public/icon-180.png', drawIcon(180));
 writeFileSync('web/public/icon-512.png', drawIcon(512));
-console.log('icons written: web/public/icon-180.png, icon-512.png');
+writeFileSync('web/public/favicon.ico', ico([
+  { size: 32, png: drawIcon(32) },
+  { size: 16, png: drawIcon(16) },
+]));
+console.log('icons written: web/public/icon-180.png, icon-512.png, favicon.ico');

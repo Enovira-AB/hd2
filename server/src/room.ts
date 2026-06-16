@@ -1,20 +1,25 @@
 import type { WebSocket } from 'ws';
 import {
   ANIM,
+  type BugState,
   type ClientMsg,
   type MissionState,
   type PlayerState,
+  type ProjectileState,
   type ServerMsg,
   type Vec3,
 } from '../../shared/protocol.js';
 import {
+  BOSS,
   BUG_KINDS,
+  MAP_HALF,
   MAX_PLAYERS,
   MISSION,
   ORBITAL_DAMAGE,
   ORBITAL_RADIUS,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
+  PROJECTILE,
   REGEN_DELAY_S,
   REGEN_PER_S,
   RIFLE,
@@ -22,16 +27,27 @@ import {
   SPRINT_SPEED,
   STRATAGEMS,
   TICK_RATE,
+  spawnWeights,
   type StratagemKind,
 } from '../../shared/constants.js';
 import {
   generateLayout,
   mulberry32,
+  raycastRocks,
   resolveCollisions,
   terrainHeight,
   type WorldLayout,
 } from '../../shared/world.js';
-import { hitscan, tickBugs, type SBug, type SPlayer } from './sim.js';
+import { hitscan, tickBugs, type ProjSpawn, type SBug, type SPlayer } from './sim.js';
+
+interface SProjectile {
+  id: number;
+  kind: number;
+  x: number; y: number; z: number;
+  vx: number; vy: number; vz: number;
+  damage: number;
+  dieAt: number;
+}
 
 interface PendingStrat {
   kind: StratagemKind;
@@ -63,8 +79,11 @@ export class Room {
   private sockets = new Map<WebSocket, SPlayer>();
   private players = new Map<string, SPlayer>();
   private bugs = new Map<number, SBug>();
+  private projectiles = new Map<number, SProjectile>();
   private supplies = new Map<number, Supply>();
   private pendingStrats: PendingStrat[] = [];
+  private titanId = 0; // bug id of the live titan, 0 if none
+  private titanSpawned = false; // already arrived this mission
   private mission: MissionState;
   private layout: WorldLayout;
   private hostId = '';
@@ -210,8 +229,11 @@ export class Room {
     this.layout = generateLayout(seed);
     this.rng = mulberry32(seed ^ 0xbeef);
     this.bugs.clear();
+    this.projectiles.clear();
     this.supplies.clear();
     this.pendingStrats = [];
+    this.titanId = 0;
+    this.titanSpawned = false;
     this.nextSpawnAt = now;
     let i = 0;
     for (const p of this.players.values()) {
@@ -298,17 +320,7 @@ export class Room {
     if (hit.kind === 'bug' && hit.bug) {
       hit.bug.hp -= RIFLE.damage;
       hit.bug.aggro = true;
-      if (hit.bug.hp <= 0) {
-        this.bugs.delete(hit.bug.id);
-        this.mission.kills++;
-        p.kills++;
-        this.broadcast({
-          type: 'bugDeath',
-          id: hit.bug.id,
-          pos: [hit.bug.x, bugY(this.mission.seed, hit.bug), hit.bug.z],
-          kind: hit.bug.kind,
-        });
-      }
+      if (hit.bug.hp <= 0) this.killBug(hit.bug, p);
     } else if (hit.kind === 'player' && hit.player) {
       this.damagePlayer(hit.player, RIFLE.damage); // friendly fire: a Helldivers tradition
     }
@@ -410,8 +422,11 @@ export class Room {
     if ((m.phase === 'COMPLETE' || m.phase === 'FAILED') && now >= this.resetAt) {
       this.setPhase('LOBBY');
       this.bugs.clear();
+      this.projectiles.clear();
       this.supplies.clear();
       this.pendingStrats = [];
+      this.titanId = 0;
+      this.titanSpawned = false;
       let i = 0;
       for (const p of this.players.values()) this.resetPlayer(p, this.spawnPoint(i++));
     }
@@ -428,12 +443,28 @@ export class Room {
         this.spawnBug();
         this.nextSpawnAt = now + interval;
       }
+      // titan arrives once the squad is halfway through a long enough quota
+      if (m.phase === 'KILL' && !this.titanSpawned &&
+          m.killTarget >= BOSS.minKillTarget && m.kills >= m.killTarget * BOSS.triggerFrac) {
+        this.spawnTitan();
+      }
     }
 
     if (this.missionActive()) {
       const players = [...this.players.values()];
-      const attacks = tickBugs(this.bugs.values(), players, m.seed, this.layout, dt, now, this.rng);
+      const { attacks, projectiles, stomps } = tickBugs(
+        this.bugs.values(), players, m.seed, this.layout, dt, now, this.rng,
+      );
       for (const a of attacks) this.damagePlayer(a.player, a.damage);
+      for (const ps of projectiles) this.spawnProjectile(ps);
+      for (const s of stomps) {
+        this.broadcast({ type: 'boom', kind: 'STOMP', pos: [s.x, terrainHeight(m.seed, s.x, s.z), s.z] });
+        for (const p of players) {
+          const d = Math.hypot(p.pos[0] - s.x, p.pos[2] - s.z);
+          if (d <= s.radius) this.damagePlayer(p, s.damage * (1 - (d / s.radius) * 0.5));
+        }
+      }
+      this.tickProjectiles(dt, now);
 
       for (const p of players) {
         if (p.pendingReload && now >= p.reloadEndAt) {
@@ -464,18 +495,7 @@ export class Room {
           const d = Math.hypot(bug.x - s.target[0], bug.z - s.target[2]);
           if (d > ORBITAL_RADIUS) continue;
           bug.hp -= ORBITAL_DAMAGE * (1 - (d / ORBITAL_RADIUS) * 0.6);
-          if (bug.hp <= 0) {
-            this.bugs.delete(bug.id);
-            this.mission.kills++;
-            const caller = this.players.get(s.by);
-            if (caller) caller.kills++;
-            this.broadcast({
-              type: 'bugDeath',
-              id: bug.id,
-              pos: [bug.x, bugY(this.mission.seed, bug), bug.z],
-              kind: bug.kind,
-            });
-          }
+          if (bug.hp <= 0) this.killBug(bug, this.players.get(s.by) ?? null);
         }
         for (const p of this.players.values()) {
           const d = Math.hypot(p.pos[0] - s.target[0], p.pos[2] - s.target[2]);
@@ -513,15 +533,21 @@ export class Room {
     if (this.layout.nests.length === 0) return;
     const nestIdx = Math.floor(this.rng() * this.layout.nests.length);
     const nest = this.layout.nests[nestIdx];
-    const kind = this.rng() < 0.72 ? 0 : 1;
+    const progress = this.mission.killTarget > 0 ? this.mission.kills / this.mission.killTarget : 0;
+    const w = spawnWeights(progress);
+    let r = this.rng() * w.reduce((a, b) => a + b, 0);
+    let kind = 0;
+    for (let k = 0; k < w.length; k++) {
+      if (r < w[k]) { kind = k; break; }
+      r -= w[k];
+    }
+    this.addBug(kind, nest.x + (this.rng() * 2 - 1) * 4, nest.z + (this.rng() * 2 - 1) * 4, nestIdx);
+  }
+
+  private addBug(kind: number, x: number, z: number, nestIdx: number): SBug {
     const id = nextEntityId++;
-    const x = nest.x + (this.rng() * 2 - 1) * 4;
-    const z = nest.z + (this.rng() * 2 - 1) * 4;
-    this.bugs.set(id, {
-      id,
-      kind,
-      x,
-      z,
+    const bug: SBug = {
+      id, kind, x, z,
       yaw: this.rng() * Math.PI * 2,
       hp: BUG_KINDS[kind].hp,
       aggro: false,
@@ -530,7 +556,83 @@ export class Room {
       targetZ: z,
       wanderUntil: 0,
       attackReadyAt: 0,
+      flags: 0,
+      windupUntil: 0,
+      chargeUntil: 0,
+      chargeDx: 0,
+      chargeDz: 0,
+    };
+    this.bugs.set(id, bug);
+    return bug;
+  }
+
+  private spawnTitan() {
+    this.titanSpawned = true;
+    const nest = this.layout.nests[Math.floor(this.rng() * this.layout.nests.length)] ?? { x: 0, z: -90 };
+    const bug = this.addBug(4, nest.x, nest.z, 0);
+    bug.aggro = true;
+    this.titanId = bug.id;
+    this.broadcast({
+      type: 'boss',
+      pos: [bug.x, terrainHeight(this.mission.seed, bug.x, bug.z), bug.z],
     });
+  }
+
+  private killBug(bug: SBug, killer: SPlayer | null) {
+    if (!this.bugs.has(bug.id)) return;
+    this.bugs.delete(bug.id);
+    const reward = BUG_KINDS[bug.kind].boss ? BOSS.killReward : 1;
+    this.mission.kills += reward;
+    if (killer) killer.kills += reward;
+    if (bug.id === this.titanId) this.titanId = 0;
+    this.broadcast({
+      type: 'bugDeath',
+      id: bug.id,
+      pos: [bug.x, bugY(this.mission.seed, bug), bug.z],
+      kind: bug.kind,
+    });
+  }
+
+  private spawnProjectile(ps: ProjSpawn) {
+    const id = nextEntityId++;
+    this.projectiles.set(id, {
+      id, kind: ps.kind,
+      x: ps.x, y: ps.y, z: ps.z,
+      vx: ps.vx, vy: ps.vy, vz: ps.vz,
+      damage: ps.damage,
+      dieAt: Date.now() + PROJECTILE.ttlS * 1000,
+    });
+  }
+
+  private tickProjectiles(dt: number, now: number) {
+    const r2 = (PROJECTILE.radius + PLAYER_RADIUS) ** 2;
+    for (const pr of [...this.projectiles.values()]) {
+      pr.vy -= PROJECTILE.gravity * dt;
+      const nx = pr.x + pr.vx * dt;
+      const ny = pr.y + pr.vy * dt;
+      const nz = pr.z + pr.vz * dt;
+
+      let hitPlayer: SPlayer | null = null;
+      for (const p of this.players.values()) {
+        if (!p.alive || p.boarded) continue;
+        const dx = p.pos[0] - nx;
+        const dy = p.pos[1] + 1.0 - ny;
+        const dz = p.pos[2] - nz;
+        if (dx * dx + dy * dy + dz * dz <= r2) { hitPlayer = p; break; }
+      }
+      const groundY = terrainHeight(this.mission.seed, nx, nz);
+      const expired = now >= pr.dieAt || Math.abs(nx) > MAP_HALF || Math.abs(nz) > MAP_HALF;
+
+      if (hitPlayer || ny <= groundY || expired) {
+        this.projectiles.delete(pr.id);
+        this.broadcast({ type: 'splat', pos: [nx, Math.max(ny, groundY), nz], kind: pr.kind });
+        if (hitPlayer) this.damagePlayer(hitPlayer, pr.damage);
+        continue;
+      }
+      pr.x = nx;
+      pr.y = ny;
+      pr.z = nz;
+    }
   }
 
   // ---- networking ----------------------------------------------------------
@@ -556,18 +658,32 @@ export class Room {
   }
 
   private broadcastSnapshot(now: number) {
-    const bugs = [...this.bugs.values()].map((b) => ({
-      id: b.id,
-      kind: b.kind,
-      pos: [b.x, bugY(this.mission.seed, b), b.z] as Vec3,
-      yaw: b.yaw,
-      hp: Math.round(b.hp),
-    }));
+    const bugs: BugState[] = [...this.bugs.values()].map((b) => {
+      const s: BugState = {
+        id: b.id,
+        kind: b.kind,
+        pos: [b.x, bugY(this.mission.seed, b), b.z],
+        yaw: b.yaw,
+        hp: Math.round(b.hp),
+      };
+      if (b.flags) s.flags = b.flags;
+      return s;
+    });
     const supplies = [...this.supplies.values()].map((s) => ({
       id: s.id,
       pos: s.pos,
       charges: s.charges,
     }));
+    const projectiles: ProjectileState[] = [...this.projectiles.values()].map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      pos: [p.x, p.y, p.z],
+      vel: [p.vx, p.vy, p.vz],
+    }));
+    const titan = this.titanId ? this.bugs.get(this.titanId) : undefined;
+    const boss = titan
+      ? { id: titan.id, hp: Math.round(titan.hp), hpMax: BUG_KINDS[titan.kind].hp }
+      : null;
     this.broadcast({
       type: 'snapshot',
       t: now,
@@ -575,6 +691,8 @@ export class Room {
       bugs,
       supplies,
       mission: this.mission,
+      projectiles: projectiles.length ? projectiles : undefined,
+      boss,
     });
   }
 

@@ -26,17 +26,20 @@ function segment(r0: number, r1: number, len: number, dir: THREE.Vector3, mat: T
 export function buildBug(kind: number, castShadow: boolean): BugRig {
   const def = BUG_KINDS[kind];
   const scale = def.radius / 0.55;
-  const isWarrior = kind === 1;
+  // visual archetypes: scavenger(0), warrior(1), spitter(2), charger(3), titan(4)
+  const heavy = kind === 1 || kind === 3 || kind === 4; // armored, crested
+  const green = kind === 2; // spitter: acid-green, bloated sac
+  const boss = kind === 4; // titan
 
   const chitin = chitinMaps();
   const chitinScale = new THREE.Vector2(0.8, 0.8);
   const shellMat = new THREE.MeshStandardMaterial({
-    color: isWarrior ? 0x33291d : 0x42372c,
+    color: green ? 0x24401c : heavy ? 0x2f2519 : 0x42372c,
     map: chitin.map, normalMap: chitin.normalMap, normalScale: chitinScale,
     roughness: 0.6, metalness: 0.15, flatShading: true,
   });
   const shellDark = new THREE.MeshStandardMaterial({
-    color: isWarrior ? 0x231b13 : 0x30271d,
+    color: green ? 0x152a10 : heavy ? 0x201810 : 0x30271d,
     map: chitin.map, normalMap: chitin.normalMap, normalScale: chitinScale,
     roughness: 0.7, metalness: 0.1, flatShading: true,
   });
@@ -44,11 +47,13 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
     color: 0xcfc6b0, roughness: 0.55, flatShading: true,
   });
   const abdomenMat = new THREE.MeshStandardMaterial({
-    color: 0x4a2a14, emissive: isWarrior ? 0xff4a16 : 0xff7a26,
-    emissiveIntensity: 0.9, roughness: 0.4, flatShading: true,
+    color: green ? 0x3a5a12 : 0x4a2a14,
+    emissive: green ? 0x9aff3a : heavy ? 0xff4a16 : 0xff7a26,
+    emissiveIntensity: green ? 1.3 : 0.9, roughness: 0.4, flatShading: true,
   });
   const eyeMat = new THREE.MeshStandardMaterial({
-    color: 0x111111, emissive: isWarrior ? 0xff3333 : 0xffb24a, emissiveIntensity: 1.8,
+    color: 0x111111,
+    emissive: green ? 0xaaff44 : heavy ? 0xff3333 : 0xffb24a, emissiveIntensity: 1.8,
   });
 
   const group = new THREE.Group();
@@ -66,8 +71,8 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
   const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 1), shellDark);
   head.scale.set(0.95, 0.8, 1.0);
   head.position.set(0, 0.34, 0.54);
-  const brow = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 1), isWarrior ? boneMat : shellMat);
-  brow.scale.set(1.1, 0.45, 0.85);
+  const brow = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 1), heavy ? boneMat : shellMat);
+  brow.scale.set(1.1, heavy ? 0.6 : 0.45, 0.85);
   brow.position.set(0, 0.45, 0.5);
   group.add(head, brow);
 
@@ -83,7 +88,7 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
   // mandibles curving inward, antennae sweeping back
   for (const side of [-1, 1]) {
     const mandible = new THREE.Mesh(
-      new THREE.ConeGeometry(isWarrior ? 0.05 : 0.035, isWarrior ? 0.3 : 0.22, 5),
+      new THREE.ConeGeometry(heavy ? 0.05 : 0.035, heavy ? 0.3 : 0.22, 5),
       boneMat,
     );
     mandible.position.set(0.1 * side, 0.25, 0.68);
@@ -94,10 +99,11 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
     group.add(mandible, antenna);
   }
 
-  // abdomen: glowing core under a dark dorsal shell — light leaks at the seams
+  // abdomen: glowing core under a dark dorsal shell — light leaks at the seams.
+  // The spitter's sac is bloated and pushed up so the acid reads from the front.
   const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 1), abdomenMat);
-  core.scale.set(1.08, 0.95, 1.5);
-  core.position.set(0, 0.36, -0.66);
+  core.scale.set(green ? 1.5 : 1.08, green ? 1.4 : 0.95, green ? 1.7 : 1.5);
+  core.position.set(0, green ? 0.5 : 0.36, green ? -0.5 : -0.66);
   const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 1), shellDark);
   shell.scale.set(1.0, 0.62, 1.12);
   shell.position.set(0, 0.52, -0.56);
@@ -105,22 +111,40 @@ export function buildBug(kind: number, castShadow: boolean): BugRig {
 
   // halo so the glow reads at distance through fog and bloom; bigger than the
   // abdomen so the ring shows around the occluding shell
-  const halo = makeGlowSprite(isWarrior ? 0xff4a16 : 0xff7a26, 1.7, 0.5);
-  halo.position.set(0, 0.38, -0.68);
+  const halo = makeGlowSprite(green ? 0x9aff3a : heavy ? 0xff4a16 : 0xff7a26, green ? 2.2 : 1.7, 0.5);
+  halo.position.set(0, 0.38, green ? -0.5 : -0.68);
   group.add(halo);
 
-  if (isWarrior) {
-    const crest = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.42, 5), boneMat);
-    crest.position.set(0, 0.6, 0.3);
+  // heavy archetypes (warrior, charger, titan) get a bone crest + back spikes;
+  // the charger adds a forward ram horn, the titan a taller crown.
+  if (heavy) {
+    const crest = new THREE.Mesh(new THREE.ConeGeometry(0.13, boss ? 0.7 : 0.42, 5), boneMat);
+    crest.position.set(0, boss ? 0.72 : 0.6, 0.3);
     crest.rotation.x = 0.55; // sweeps back over the body
     group.add(crest);
     for (const side of [-1, 1]) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 5), boneMat);
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.07, boss ? 0.5 : 0.3, 5), boneMat);
       spike.position.set(0.16 * side, 0.6, -0.2);
       spike.rotation.x = 0.5;
       spike.rotation.z = -0.35 * side;
       group.add(spike);
     }
+    if (boss) {
+      for (const side of [-1, 1]) {
+        const tusk = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.6, 5), boneMat);
+        tusk.position.set(0.26 * side, 0.5, 0.55);
+        tusk.rotation.x = 1.7;
+        tusk.rotation.z = -0.5 * side;
+        group.add(tusk);
+      }
+    }
+  }
+  // charger: a single forward ram horn
+  if (kind === 3) {
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.6, 6), boneMat);
+    horn.position.set(0, 0.5, 0.8);
+    horn.rotation.x = Math.PI / 2;
+    group.add(horn);
   }
 
   // six jointed legs: femur up-out from the hip, tibia down to the ground

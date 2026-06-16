@@ -8,8 +8,10 @@ import WebSocket from 'ws';
 const PORT = 8125;
 const OVERRIDES = {
   killBase: 2,
-  bugCapBase: 2,
-  spawnIntervalS: 0.4,
+  killPerExtraPlayer: 0, // keep the quota tiny (and below the titan threshold)
+  bugCapBase: 1,
+  bugCapPerExtraPlayer: 0, // at most ~1 weak bug: this test checks the phase
+  spawnIntervalS: 0.4,     // machine, not the squad's survival (see boss.mjs)
   dropDurationS: 1,
   defendDurationS: 4,
   boardGraceS: 3,
