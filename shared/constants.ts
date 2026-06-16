@@ -77,6 +77,9 @@ export const TITAN_STOMP = { radius: 6.5, damage: 42 } as const;
 // Boss arrival: once the squad is halfway to quota on a long enough mission.
 export const BOSS = { triggerFrac: 0.5, minKillTarget: 12, killReward: 8 } as const;
 
+// Destructible bug nests. On NESTS missions, sealing them all is the objective.
+export const NEST = { hp: 600 } as const;
+
 // Relative spawn weights per kind, ramped by mission progress (0..1).
 export function spawnWeights(progress: number): number[] {
   // scavenger, warrior, spitter, charger  (titan never spawns from the pool)

@@ -256,6 +256,15 @@ export class Game {
       this.sfx.beep(true);
     });
 
+    n.on('nestDeath', (m) => {
+      if (m.type !== 'nestDeath') return;
+      const pos = new THREE.Vector3(...m.pos);
+      this.fx.explosion(pos, 11, this.world.camera.position);
+      this.world.destroyNest(m.i);
+      this.sfx.explosion(Math.max(0.3, 1 - this.pos.distanceTo(pos) / 120));
+      this.hud.banner('NEST SEALED', '', 1600);
+    });
+
     n.on('boss', (m) => {
       if (m.type !== 'boss') return;
       this.hud.banner('⚠ BILE TITAN', 'A TERMINID BEHEMOTH APPROACHES', 3600);
@@ -310,7 +319,11 @@ export class Game {
         break;
       }
       case 'KILL':
-        this.hud.banner('ERADICATE THE TERMINIDS', `${m.killTarget} CONFIRMED KILLS REQUIRED`);
+        if (m.objective === 'NESTS') {
+          this.hud.banner('SEAL THE NESTS', `DESTROY ALL ${m.nestsTotal} BUG NESTS`);
+        } else {
+          this.hud.banner('ERADICATE THE TERMINIDS', `${m.killTarget} CONFIRMED KILLS REQUIRED`);
+        }
         break;
       case 'EXTRACT':
         this.hud.banner('OBJECTIVE COMPLETE', 'PROCEED TO THE EXTRACTION BEACON');
@@ -877,7 +890,11 @@ export class Game {
         this.hud.setObjective('DEPLOYING', 'BRACE FOR IMPACT');
         break;
       case 'KILL':
-        this.hud.setObjective('ERADICATE TERMINIDS', `${m.kills} / ${m.killTarget}${reinforceHint}`);
+        if (m.objective === 'NESTS') {
+          this.hud.setObjective('SEAL THE NESTS', `${m.nestsTotal - m.nestsLeft} / ${m.nestsTotal}${reinforceHint}`);
+        } else {
+          this.hud.setObjective('ERADICATE TERMINIDS', `${m.kills} / ${m.killTarget}${reinforceHint}`);
+        }
         break;
       case 'EXTRACT':
         this.hud.setObjective('REACH EXTRACTION', `BEACON ${padDist}m${reinforceHint}`);

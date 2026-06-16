@@ -125,10 +125,10 @@ export class Effects {
     sprite.scale.set(sc, sc, 1);
   }
 
-  impact(pos: THREE.Vector3, kind: 'rock' | 'bug' | 'player' | 'none') {
+  impact(pos: THREE.Vector3, kind: 'rock' | 'bug' | 'player' | 'nest' | 'none') {
     if (kind === 'none') return;
-    const color = kind === 'bug' ? 0x9aff66 : kind === 'player' ? 0xff6655 : 0xffb36b;
-    this.burst(pos, 12, color, 4.5, 0.45, 0.09);
+    const color = kind === 'bug' ? 0x9aff66 : kind === 'player' ? 0xff6655 : kind === 'nest' ? 0xff7a2a : 0xffb36b;
+    this.burst(pos, kind === 'nest' ? 16 : 12, color, 4.5, 0.45, 0.09);
   }
 
   private burst(pos: THREE.Vector3, n: number, color: number, speed: number, ttl: number, size: number) {

@@ -79,14 +79,26 @@ export type MissionPhase =
   | 'COMPLETE'
   | 'FAILED';
 
+export type MissionObjective = 'ERADICATE' | 'NESTS';
+
 export interface MissionState {
   phase: MissionPhase;
   seed: number;
+  objective: MissionObjective;
   kills: number;
   killTarget: number;
+  nestsLeft: number; // live bug nests (NESTS objective)
+  nestsTotal: number;
   reinforceLeft: number;
   // server clock (ms) when the current phase auto-advances; 0 if not timed
   phaseEndsAt: number;
+}
+
+export interface NestState {
+  i: number; // index into the layout's nests
+  pos: Vec3;
+  hp: number;
+  hpMax: number;
 }
 
 export type ClientMsg =
@@ -100,7 +112,7 @@ export type ClientMsg =
   | { type: 'interact' }
   | { type: 'ping'; t: number };
 
-export type HitKind = 'bug' | 'player' | 'rock' | 'none';
+export type HitKind = 'bug' | 'player' | 'rock' | 'nest' | 'none';
 
 export type ServerMsg =
   | {
@@ -124,6 +136,7 @@ export type ServerMsg =
       projectiles?: ProjectileState[]; // omitted when none in flight
       sentries?: SentryState[]; // deployed auto-turrets
       fires?: FireZoneState[]; // burning napalm zones
+      nests?: NestState[]; // live destructible nests
       boss?: { id: number; hp: number; hpMax: number } | null; // titan healthbar
     }
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
@@ -131,6 +144,7 @@ export type ServerMsg =
   | { type: 'recon'; pos: Vec3 } // recon pulse ping (clients reveal nearby bugs)
   | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
   | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
+  | { type: 'nestDeath'; i: number; pos: Vec3 } // a nest was sealed/destroyed
   | { type: 'boss'; pos: Vec3 } // titan arrival
   | { type: 'hit'; id: string; hp: number } // a player took damage
   | { type: 'down'; id: string }

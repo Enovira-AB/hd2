@@ -89,6 +89,7 @@ export class World3D {
   private skyMat!: THREE.ShaderMaterial;
   private nestGlows: THREE.Mesh[] = [];
   private nestHalos: THREE.Sprite[] = [];
+  private nestGroups: THREE.Group[] = [];
   private padRing!: THREE.Mesh;
   private padPillar!: THREE.Mesh;
   private padLight!: THREE.PointLight;
@@ -384,8 +385,10 @@ export class World3D {
     this.worldGroup.add(rocks);
 
     // bug nests: glowing mounds
+    this.nestGroups = [];
     for (const nest of this.layout.nests) {
       const y = terrainHeight(seed, nest.x, nest.z);
+      const group = new THREE.Group();
       const mound = new THREE.Mesh(
         new THREE.IcosahedronGeometry(2.6, 1),
         new THREE.MeshStandardMaterial({
@@ -395,16 +398,16 @@ export class World3D {
       );
       mound.position.set(nest.x, y - 0.6, nest.z);
       mound.scale.y = 0.55;
-      this.worldGroup.add(mound);
+      group.add(mound);
       this.nestGlows.push(mound);
       const halo = makeGlowSprite(0xff5a1f, 7, 0.35);
       halo.position.set(nest.x, y + 1.4, nest.z);
-      this.worldGroup.add(halo);
+      group.add(halo);
       this.nestHalos.push(halo);
       if (!this.mobile) {
         const l = new THREE.PointLight(0xff5a1f, 26, 17, 2);
         l.position.set(nest.x, y + 1.6, nest.z);
-        this.worldGroup.add(l);
+        group.add(l);
       }
       // scatter chitinous spikes around the mound
       const spikes = new THREE.InstancedMesh(
@@ -425,7 +428,9 @@ export class World3D {
         );
         spikes.setMatrixAt(i, m);
       }
-      this.worldGroup.add(spikes);
+      group.add(spikes);
+      this.worldGroup.add(group);
+      this.nestGroups.push(group);
     }
 
     // extraction pad
@@ -491,6 +496,20 @@ export class World3D {
 
   setPadMode(mode: 'off' | 'on' | 'blink') {
     this.padMode = mode;
+  }
+
+  destroyNest(i: number) {
+    const g = this.nestGroups[i];
+    if (!g || !g.visible) return;
+    g.visible = false;
+    const nest = this.layout.nests[i];
+    if (!nest) return;
+    const crater = new THREE.Mesh(
+      new THREE.CircleGeometry(3.2, 18).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x120c07, roughness: 1 }),
+    );
+    crater.position.set(nest.x, this.terrainY(nest.x, nest.z) + 0.06, nest.z);
+    this.worldGroup.add(crater);
   }
 
   terrainY(x: number, z: number): number {

@@ -9,13 +9,13 @@ const PORT = 8142;
 const OVERRIDES = {
   killBase: 12,          // killTarget = 12 -> titan threshold met
   killPerExtraPlayer: 0,
-  bugCapBase: 30,        // dense field so spitters appear quickly
+  bugCapBase: 16,        // enough spitters appear, survivable for the bot
   spawnIntervalS: 0.2,
   dropDurationS: 0.5,
 };
 
 const server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server/src/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
+  env: { ...process.env, PORT: String(PORT), HD_OBJECTIVE: 'ERADICATE', HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
   stdio: ['ignore', 'ignore', 'inherit'],
   detached: true,
 });
@@ -92,8 +92,20 @@ try {
           const len = Math.hypot(...d) || 1;
           ws.send(JSON.stringify({ type: 'fire', origin: o, dir: d.map((v) => v / len) }));
         }
-        // kite away from the nearest threat (and strafe) to stay alive
-        if (nearest && nd < 30) {
+        // until we've seen acid fly, deliberately close on the nearest spitter
+        // so it gets inside its 32 m firing range (kiting otherwise outruns it)
+        const spitter = snapshot.bugs
+          .filter((b) => b.kind === 2)
+          .sort((a, b) => Math.hypot(a.pos[0] - me.pos[0], a.pos[2] - me.pos[2]) - Math.hypot(b.pos[0] - me.pos[0], b.pos[2] - me.pos[2]))[0];
+        if (!seen.projectile && spitter) {
+          const dx = spitter.pos[0] - me.pos[0];
+          const dz = spitter.pos[2] - me.pos[2];
+          const d = Math.hypot(dx, dz) || 1;
+          if (d > 24) {
+            ws.send(JSON.stringify({ type: 'state', pos: [me.pos[0] + (dx / d) * 0.55, me.pos[1], me.pos[2] + (dz / d) * 0.55], yaw: 0, pitch: 0, anim: 3 }));
+          }
+        } else if (nearest && nd < 30) {
+          // kite away from the nearest threat (and strafe) to stay alive
           const ax = me.pos[0] - nearest.pos[0];
           const az = me.pos[2] - nearest.pos[2];
           const al = Math.hypot(ax, az) || 1;
