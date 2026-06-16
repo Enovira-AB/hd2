@@ -4,9 +4,11 @@
 import type {
   BugState,
   ClientMsg,
+  FireZoneState,
   MissionState,
   PlayerState,
   ProjectileState,
+  SentryState,
   ServerMsg,
   SupplyState,
 } from '../../shared/protocol.js';
@@ -36,6 +38,8 @@ export class Net {
   latestPlayers: PlayerState[] = [];
   latestSupplies: SupplyState[] = [];
   latestProjectiles: ProjectileState[] = [];
+  latestSentries: SentryState[] = [];
+  latestFires: FireZoneState[] = [];
   latestSnapT = 0; // server clock (ms) of the most recent snapshot
   boss: { id: number; hp: number; hpMax: number } | null = null;
   connected = false;
@@ -96,6 +100,8 @@ export class Net {
         this.latestPlayers = msg.players;
         this.latestSupplies = msg.supplies;
         this.latestProjectiles = msg.projectiles ?? [];
+        this.latestSentries = msg.sentries ?? [];
+        this.latestFires = msg.fires ?? [];
         this.boss = msg.boss ?? null;
         this.latestSnapT = msg.t;
         break;

@@ -50,6 +50,35 @@ function boomKey(kind: string, pos: Vec3): string {
   return `${kind}|${pos[0].toFixed(0)},${pos[2].toFixed(0)}`;
 }
 
+// Procedural sentry turret: a rotatable head (children[0]) on a tripod.
+function makeSentry(): THREE.Group {
+  const g = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x3a4048, metalness: 0.6, roughness: 0.5 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x202329, metalness: 0.4, roughness: 0.6 });
+
+  const turret = new THREE.Group();
+  turret.position.y = 0.95;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), metal);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.7, 8), dark);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.05, 0.45);
+  const eye = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff3322, emissiveIntensity: 2 }),
+  );
+  eye.position.set(0, 0.12, 0.26);
+  turret.add(body, barrel, eye);
+  g.add(turret); // children[0]
+
+  for (const a of [0, 2.094, 4.188]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.0, 6), dark);
+    leg.position.set(Math.sin(a) * 0.28, 0.45, Math.cos(a) * 0.28);
+    leg.rotation.set(Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.3);
+    g.add(leg);
+  }
+  return g;
+}
+
 export class Game {
   // local player
   pos = new THREE.Vector3();
@@ -69,6 +98,7 @@ export class Game {
   private views = new Map<string, SoldierView>();
   private bugViews = new Map<number, BugView>();
   private supplyViews = new Map<number, THREE.Group>();
+  private sentryViews = new Map<number, THREE.Group>();
   private colorAssign = new Map<string, number>();
   private pending: { when: number; fn: () => void }[] = [];
   private lastPhase: MissionPhase | '' = '';
@@ -207,6 +237,21 @@ export class Game {
       this.sfx.impact(Math.max(0.15, 1 - this.pos.distanceTo(pos) / 50));
     });
 
+    n.on('sentryFire', (m) => {
+      if (m.type !== 'sentryFire') return;
+      const from = new THREE.Vector3(...m.from);
+      const to = new THREE.Vector3(...m.to);
+      this.fx.tracer(from, to, () => this.fx.impact(to, 'bug'));
+      this.fx.muzzleFlash(from);
+      this.sfx.fire(Math.max(0.1, 0.6 - this.pos.distanceTo(from) / 90));
+    });
+
+    n.on('recon', (m) => {
+      if (m.type !== 'recon') return;
+      this.fx.reconPing(new THREE.Vector3(...m.pos));
+      this.sfx.beep(true);
+    });
+
     n.on('boss', (m) => {
       if (m.type !== 'boss') return;
       this.hud.banner('⚠ BILE TITAN', 'A TERMINID BEHEMOTH APPROACHES', 3600);
@@ -307,9 +352,11 @@ export class Game {
       for (const v of this.views.values()) this.world.scene.remove(v.group);
       for (const b of this.bugViews.values()) this.world.scene.remove(b.group);
       for (const s of this.supplyViews.values()) this.world.scene.remove(s);
+      for (const s of this.sentryViews.values()) this.world.scene.remove(s);
       this.views.clear();
       this.bugViews.clear();
       this.supplyViews.clear();
+      this.sentryViews.clear();
       const self = this.selfState();
       if (self) this.pos.set(...self.pos);
       this.pos.y = this.world.terrainY(this.pos.x, this.pos.z);
@@ -337,6 +384,7 @@ export class Game {
     this.updateInteract();
     this.reconcileViews(dt, time);
     this.updateProjectilesAndBoss();
+    this.updateDeployables(time);
     // tension audio swells with the swarm closing in
     let near = 0;
     for (const v of this.bugViews.values()) {
@@ -741,6 +789,30 @@ export class Game {
     }));
     this.fx.syncProjectiles(list);
     this.hud.setBoss(this.net.boss);
+  }
+
+  // Render deployed sentry turrets and napalm fire zones from the snapshot.
+  private updateDeployables(time: number) {
+    const seen = new Set<number>();
+    for (const s of this.net.latestSentries) {
+      seen.add(s.id);
+      let g = this.sentryViews.get(s.id);
+      if (!g) {
+        g = makeSentry();
+        this.world.scene.add(g);
+        this.sentryViews.set(s.id, g);
+      }
+      g.position.set(s.pos[0], s.pos[1], s.pos[2]);
+      const turret = g.children[0];
+      if (turret) turret.rotation.y = s.yaw;
+    }
+    for (const [id, g] of this.sentryViews) {
+      if (!seen.has(id)) {
+        this.world.scene.remove(g);
+        this.sentryViews.delete(id);
+      }
+    }
+    this.fx.syncFires(this.net.latestFires.map((f) => ({ id: f.id, pos: f.pos, radius: f.radius })), time);
   }
 
   // ---- HUD + state -------------------------------------------------------------------

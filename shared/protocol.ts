@@ -55,6 +55,19 @@ export interface SupplyState {
   charges: number;
 }
 
+export interface SentryState {
+  id: number;
+  pos: Vec3;
+  yaw: number;
+  hp: number;
+}
+
+export interface FireZoneState {
+  id: number;
+  pos: Vec3;
+  radius: number;
+}
+
 export type MissionPhase =
   | 'LOBBY'
   | 'DROP'
@@ -107,9 +120,13 @@ export type ServerMsg =
       supplies: SupplyState[];
       mission: MissionState;
       projectiles?: ProjectileState[]; // omitted when none in flight
+      sentries?: SentryState[]; // deployed auto-turrets
+      fires?: FireZoneState[]; // burning napalm zones
       boss?: { id: number; hp: number; hpMax: number } | null; // titan healthbar
     }
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
+  | { type: 'sentryFire'; id: number; from: Vec3; to: Vec3 } // turret tracer
+  | { type: 'recon'; pos: Vec3 } // recon pulse ping (clients reveal nearby bugs)
   | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
   | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
   | { type: 'boss'; pos: Vec3 } // titan arrival

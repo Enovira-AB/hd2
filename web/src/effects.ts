@@ -527,6 +527,79 @@ export class Effects {
     });
   }
 
+  // ---- napalm fire zones + recon ping ------------------------------------------------
+
+  private fireZones = new Map<number, { group: THREE.Group; light: THREE.PointLight; sprites: THREE.Sprite[] }>();
+
+  syncFires(list: { id: number; pos: [number, number, number]; radius: number }[], time: number) {
+    const seen = new Set<number>();
+    for (const f of list) {
+      seen.add(f.id);
+      let z = this.fireZones.get(f.id);
+      if (!z) {
+        const group = new THREE.Group();
+        group.position.set(f.pos[0], f.pos[1], f.pos[2]);
+        const sprites: THREE.Sprite[] = [];
+        const n = this.mobile ? 10 : 20;
+        for (let i = 0; i < n; i++) {
+          const s = makeGlowSprite(i % 3 === 0 ? 0xffd23a : 0xff5a16, 1.4, 0.6);
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * f.radius * 0.92;
+          s.position.set(Math.cos(a) * r, 0.4, Math.sin(a) * r);
+          s.userData.phase = Math.random() * 10;
+          s.userData.base = 1.2 + Math.random() * 1.6;
+          group.add(s);
+          sprites.push(s);
+        }
+        const light = new THREE.PointLight(0xff5a1a, 40, f.radius * 2.6, 2);
+        light.position.y = 1.6;
+        group.add(light);
+        this.scene.add(group);
+        z = { group, light, sprites };
+        this.fireZones.set(f.id, z);
+      }
+      for (const s of z.sprites) {
+        const ph = s.userData.phase as number;
+        const rise = ((time * 0.6 + ph) % 1);
+        s.position.y = 0.3 + rise * 1.8;
+        const sc = (s.userData.base as number) * (1 - rise * 0.5);
+        s.scale.set(sc, sc, 1);
+        (s.material as THREE.SpriteMaterial).opacity = 0.7 * (1 - rise);
+      }
+      z.light.intensity = 34 + Math.sin(time * 14) * 16;
+    }
+    for (const [id, z] of this.fireZones) {
+      if (!seen.has(id)) {
+        this.scene.remove(z.group);
+        this.fireZones.delete(id);
+      }
+    }
+  }
+
+  reconPing(pos: THREE.Vector3) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.4, 0.7, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0x69d7ff, transparent: true, opacity: 0.9, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+      }),
+    );
+    ring.position.copy(pos).add(new THREE.Vector3(0, 0.6, 0));
+    this.scene.add(ring);
+    this.timed.push({
+      obj: ring, age: 0, ttl: 1.4,
+      tick: (t) => {
+        const s = 1 + t * 70;
+        ring.scale.set(s, s, s);
+        (ring.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t);
+      },
+    });
+    const light = new THREE.PointLight(0x69d7ff, 50, 30, 2);
+    light.position.copy(pos).add(new THREE.Vector3(0, 2, 0));
+    this.scene.add(light);
+    this.timed.push({ obj: light, age: 0, ttl: 0.5, tick: (t) => { light.intensity = 50 * (1 - t); } });
+  }
+
   // ---- update ------------------------------------------------------------------------
 
   update(dt: number, time: number) {
