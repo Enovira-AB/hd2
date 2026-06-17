@@ -98,6 +98,7 @@ export interface MissionState {
   phase: MissionPhase;
   seed: number;
   objective: MissionObjective;
+  difficulty: number; // selected difficulty tier id
   kills: number;
   killTarget: number;
   nestsLeft: number; // live bug nests (NESTS objective)
@@ -121,6 +122,7 @@ export type ClientMsg =
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
   | { type: 'dive'; dir: Vec3 }
   | { type: 'loadout'; weapon: string; stratagems: string[] } // chosen in the lobby
+  | { type: 'difficulty'; tier: number } // host picks the mission difficulty
   | { type: 'reload' }
   | { type: 'stratagem'; kind: string; target: Vec3 }
   | { type: 'interact' }

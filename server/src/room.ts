@@ -19,6 +19,8 @@ import {
   BOSS,
   BUG_KINDS,
   DIVE,
+  difficultyById,
+  type DifficultyDef,
   MAP_HALF,
   MAX_PLAYERS,
   MISSION,
@@ -127,6 +129,7 @@ export class Room {
   private nextSpawnAt = 0;
   private resetAt = 0;
   private progressCommitted = false; // mission-end XP already banked
+  private difficultyTier = 2; // CHALLENGING — baseline (×1 modifiers)
   private tickTimer: NodeJS.Timeout;
   private snapshotToggle = false;
   private lastTick = Date.now();
@@ -139,6 +142,7 @@ export class Room {
       phase: 'LOBBY',
       seed,
       objective: 'ERADICATE',
+      difficulty: this.difficultyTier,
       kills: 0,
       killTarget: 0,
       nestsLeft: 0,
@@ -149,6 +153,10 @@ export class Room {
     this.layout = generateLayout(seed);
     this.rng = mulberry32(seed ^ 0xbeef);
     this.tickTimer = setInterval(() => this.tick(), 1000 / TICK_RATE);
+  }
+
+  private get diff(): DifficultyDef {
+    return difficultyById(this.difficultyTier);
   }
 
   dispose() {
@@ -249,6 +257,9 @@ export class Room {
       case 'loadout':
         this.handleLoadout(player, msg.weapon, msg.stratagems);
         break;
+      case 'difficulty':
+        this.handleDifficulty(player, msg.tier);
+        break;
       case 'fire':
         this.handleFire(player, msg.origin, msg.dir);
         break;
@@ -290,8 +301,9 @@ export class Room {
       phase: 'DROP',
       seed,
       objective,
+      difficulty: this.difficultyTier,
       kills: 0,
-      killTarget: M.killBase + M.killPerExtraPlayer * (n - 1),
+      killTarget: Math.max(1, Math.round((M.killBase + M.killPerExtraPlayer * (n - 1)) * this.diff.killMult)),
       nestsLeft: this.layout.nests.length,
       nestsTotal: this.layout.nests.length,
       reinforceLeft: M.reinforceBase + M.reinforcePerExtraPlayer * (n - 1),
@@ -358,7 +370,8 @@ export class Room {
       const before = levelForXp(p.profile.xp).level;
       const completion = won ? PROGRESSION.missionXp : 0;
       const combat = p.mKillXp + p.mNestXp;
-      const gained = Math.round((won ? combat : combat * PROGRESSION.failXpFactor) + completion);
+      const raw = (won ? combat : combat * PROGRESSION.failXpFactor) + completion;
+      const gained = Math.round(raw * this.diff.xpMult); // harder tiers pay more
 
       p.profile.xp += gained;
       p.profile.kills += p.kills;
@@ -392,8 +405,9 @@ export class Room {
 
   private bugCap() {
     const n = Math.max(1, this.players.size);
-    const base = M.bugCapBase + M.bugCapPerExtraPlayer * (n - 1);
-    return this.mission.phase === 'DEFEND' ? Math.floor(base * M.defendCapMult) : base;
+    const base = (M.bugCapBase + M.bugCapPerExtraPlayer * (n - 1)) * this.diff.bugCapMult;
+    const capped = this.mission.phase === 'DEFEND' ? base * M.defendCapMult : base;
+    return Math.floor(capped); // a configured cap of 0 stays 0 (tests rely on it)
   }
 
   // ---- message handlers ----------------------------------------------------
@@ -429,6 +443,17 @@ export class Room {
     const valid = stratagems.filter((s) => s in STRATAGEMS);
     p.loadout = valid.length ? Array.from(new Set(['REINFORCE', ...valid])).slice(0, 5) : p.loadout;
     if (p.ammo > p.weapon.magSize) p.ammo = p.weapon.magSize;
+  }
+
+  // Host-only, lobby-only. Gated by the host's rank so harder tiers unlock with
+  // progression. Reflected immediately in the mission state so the lobby updates.
+  private handleDifficulty(p: SPlayer, tier: number) {
+    if (this.missionActive() || p.id !== this.hostId) return;
+    const d = difficultyById(tier);
+    if (d.id !== tier || p.level < d.unlockLevel) return; // unknown or locked tier
+    this.difficultyTier = d.id;
+    this.mission.difficulty = d.id;
+    this.broadcastPhase();
   }
 
   private handleDive(p: SPlayer, dir: Vec3) {
@@ -600,7 +625,8 @@ export class Room {
     }
 
     if (this.missionActive() && m.phase !== 'DROP') {
-      const interval = m.phase === 'DEFEND' ? M.spawnIntervalS * 550 : M.spawnIntervalS * 1000;
+      const base = m.phase === 'DEFEND' ? M.spawnIntervalS * 550 : M.spawnIntervalS * 1000;
+      const interval = base * this.diff.spawnMult;
       if (now >= this.nextSpawnAt && this.bugs.size < this.bugCap()) {
         this.spawnBug();
         this.nextSpawnAt = now + interval;
@@ -627,13 +653,14 @@ export class Room {
       const { attacks, projectiles, stomps } = tickBugs(
         this.bugs.values(), players, m.seed, this.layout, dt, now, this.rng,
       );
-      for (const a of attacks) this.damagePlayer(a.player, a.damage);
+      const dmgMult = this.diff.dmgMult;
+      for (const a of attacks) this.damagePlayer(a.player, a.damage * dmgMult);
       for (const ps of projectiles) this.spawnProjectile(ps);
       for (const s of stomps) {
         this.broadcast({ type: 'boom', kind: 'STOMP', pos: [s.x, terrainHeight(m.seed, s.x, s.z), s.z] });
         for (const p of players) {
           const d = Math.hypot(p.pos[0] - s.x, p.pos[2] - s.z);
-          if (d <= s.radius) this.damagePlayer(p, s.damage * (1 - (d / s.radius) * 0.5));
+          if (d <= s.radius) this.damagePlayer(p, s.damage * (1 - (d / s.radius) * 0.5) * dmgMult);
         }
       }
       this.tickProjectiles(dt, now);
@@ -741,7 +768,15 @@ export class Room {
     const nestIdx = live[Math.floor(this.rng() * live.length)];
     const nest = this.layout.nests[nestIdx];
     const progress = this.mission.killTarget > 0 ? this.mission.kills / this.mission.killTarget : 0;
-    const w = spawnWeights(progress);
+    const w = spawnWeights(progress).slice();
+    // higher difficulty shifts the table from scavengers toward warriors/chargers
+    const bias = this.diff.heavyBias;
+    if (bias > 0 && w.length >= 4) {
+      const take = w[0] * bias;
+      w[0] -= take;
+      w[1] += take * 0.5; // warriors
+      w[3] += take * 0.5; // chargers
+    }
     let r = this.rng() * w.reduce((a, b) => a + b, 0);
     let kind = 0;
     for (let k = 0; k < w.length; k++) {
@@ -756,7 +791,7 @@ export class Room {
     const bug: SBug = {
       id, kind, x, z,
       yaw: this.rng() * Math.PI * 2,
-      hp: BUG_KINDS[kind].hp,
+      hp: Math.round(BUG_KINDS[kind].hp * this.diff.hpMult),
       aggro: false,
       nest: nestIdx,
       targetX: x,
@@ -826,7 +861,7 @@ export class Room {
       id, kind: ps.kind,
       x: ps.x, y: ps.y, z: ps.z,
       vx: ps.vx, vy: ps.vy, vz: ps.vz,
-      damage: ps.damage,
+      damage: ps.damage * this.diff.dmgMult,
       dieAt: Date.now() + PROJECTILE.ttlS * 1000,
     });
   }
@@ -982,7 +1017,7 @@ export class Room {
     }
     const titan = this.titanId ? this.bugs.get(this.titanId) : undefined;
     const boss = titan
-      ? { id: titan.id, hp: Math.round(titan.hp), hpMax: BUG_KINDS[titan.kind].hp }
+      ? { id: titan.id, hp: Math.round(titan.hp), hpMax: Math.round(BUG_KINDS[titan.kind].hp * this.diff.hpMult) }
       : null;
     this.broadcast({
       type: 'snapshot',

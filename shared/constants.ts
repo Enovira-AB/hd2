@@ -97,6 +97,34 @@ export function unlockedWeapons(level: number): string[] {
   return WEAPONS.filter((w) => level >= w.unlockLevel).map((w) => w.id);
 }
 
+// Difficulty tiers scale the whole mission. The baseline tier (CHALLENGING)
+// leaves everything at ×1 so the default game is unchanged; harder tiers add
+// more, tougher, heavier enemies and pay out more XP. Tiers unlock with rank.
+export interface DifficultyDef {
+  id: number; // 1..N, shown to players
+  name: string;
+  bugCapMult: number; // concurrent enemy cap
+  spawnMult: number; // ×spawn interval (<1 = spawns come faster)
+  hpMult: number; // enemy health
+  dmgMult: number; // enemy damage
+  heavyBias: number; // 0..1, shifts the spawn table toward warriors/chargers
+  killMult: number; // eradicate quota
+  xpMult: number; // reward payout
+  unlockLevel: number; // account rank required to select
+}
+
+export const DIFFICULTIES: DifficultyDef[] = [
+  { id: 1, name: 'TRIVIAL',     bugCapMult: 0.7, spawnMult: 1.35, hpMult: 0.85, dmgMult: 0.7,  heavyBias: 0.0,  killMult: 0.7, xpMult: 0.7, unlockLevel: 1 },
+  { id: 2, name: 'CHALLENGING', bugCapMult: 1.0, spawnMult: 1.0,  hpMult: 1.0,  dmgMult: 1.0,  heavyBias: 0.1,  killMult: 1.0, xpMult: 1.0, unlockLevel: 1 },
+  { id: 3, name: 'HARD',        bugCapMult: 1.3, spawnMult: 0.82, hpMult: 1.25, dmgMult: 1.2,  heavyBias: 0.25, killMult: 1.3, xpMult: 1.5, unlockLevel: 3 },
+  { id: 4, name: 'EXTREME',     bugCapMult: 1.6, spawnMult: 0.68, hpMult: 1.55, dmgMult: 1.45, heavyBias: 0.4,  killMult: 1.6, xpMult: 2.1, unlockLevel: 5 },
+  { id: 5, name: 'HELLDIVE',    bugCapMult: 2.0, spawnMult: 0.55, hpMult: 2.0,  dmgMult: 1.8,  heavyBias: 0.6,  killMult: 2.0, xpMult: 3.0, unlockLevel: 8 },
+];
+
+export function difficultyById(id: number): DifficultyDef {
+  return DIFFICULTIES.find((d) => d.id === id) ?? DIFFICULTIES[1]; // default: CHALLENGING (×1)
+}
+
 export interface BugKindDef {
   name: string;
   hp: number;

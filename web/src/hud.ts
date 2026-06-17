@@ -1,7 +1,7 @@
 // DOM HUD: squad list, objective, ammo, stratagem uplink, banners, screens.
 
 import type { MissionState, PlayerState, ServerMsg } from '../../shared/protocol.js';
-import { STRATAGEMS, weaponById } from '../../shared/constants.js';
+import { STRATAGEMS, difficultyById, weaponById } from '../../shared/constants.js';
 
 type Progress = Extract<ServerMsg, { type: 'progress' }>;
 
@@ -64,9 +64,10 @@ export class Hud {
     const won = mission.phase === 'COMPLETE';
     el('summary-title').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED';
     (el('summary-title') as HTMLElement).style.color = won ? 'var(--yellow)' : 'var(--red)';
-    el('summary-sub').textContent = won
+    const diff = difficultyById(mission.difficulty).name;
+    el('summary-sub').textContent = (won
       ? 'DEMOCRACY HAS BEEN DELIVERED'
-      : 'LIBERTY WEEPS — BUT SUPER EARTH REMEMBERS';
+      : 'LIBERTY WEEPS — BUT SUPER EARTH REMEMBERS') + ` · ${diff}`;
     this.renderRewards(progress);
     el('summary-players').innerHTML = players
       .map((p) => `<li><span>${esc(p.name)}</span><span>${p.kills} KILLS</span></li>`)

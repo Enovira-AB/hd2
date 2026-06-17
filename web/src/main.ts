@@ -10,7 +10,7 @@ import { Sfx } from './sfx.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
 import { preloadModels } from './models.js';
-import { STRATAGEMS, WEAPONS, weaponById } from '../../shared/constants.js';
+import { DIFFICULTIES, STRATAGEMS, WEAPONS, weaponById } from '../../shared/constants.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 preloadModels(); // optional drop-in GLBs; procedural fallback otherwise
@@ -37,6 +37,30 @@ function pushLoadout() {
   localStorage.setItem('weapon', pickWeapon);
   localStorage.setItem('strats', JSON.stringify(pickStrats));
   game.setLoadout(pickWeapon, pickStrats);
+}
+
+// Difficulty picker (lobby). Only the host can change it; everyone sees the
+// selection. Tiers above the host's rank are locked.
+function buildDifficulty() {
+  const list = document.getElementById('diff-list')!;
+  const isHost = net.selfId !== '' && net.selfId === net.hostId;
+  const hostLevel = net.profile?.level ?? 1; // gate by our own rank (the host's)
+  const current = net.mission?.difficulty ?? 2;
+  const cur = DIFFICULTIES.find((d) => d.id === current);
+  document.getElementById('diff-current')!.textContent = cur ? `· ${cur.name}` : '';
+  list.innerHTML = '';
+  for (const d of DIFFICULTIES) {
+    const locked = isHost && hostLevel < d.unlockLevel;
+    const b = document.createElement('button');
+    b.className = 'diff-btn' + (d.id === current ? ' on' : '') + (locked ? ' locked' : '');
+    b.disabled = !isHost || locked;
+    b.title = `cap ×${d.bugCapMult} · hp ×${d.hpMult} · dmg ×${d.dmgMult} · XP ×${d.xpMult}`;
+    b.innerHTML = locked
+      ? `${d.id}<span class="dl">🔒${d.unlockLevel}</span>`
+      : `${d.id}<span class="dl">${d.name}</span>`;
+    if (isHost && !locked) b.onclick = () => net.send({ type: 'difficulty', tier: d.id });
+    list.appendChild(b);
+  }
 }
 
 // Account rank + XP bar in the lobby (hidden until we have a profile).
@@ -151,13 +175,16 @@ document.getElementById('btn-start')!.addEventListener('click', () => net.send({
 
 function updateLobby() {
   hud.updateLobby(net.latestPlayers, net.selfId, net.hostId, net.room);
+  buildDifficulty();
 }
 
 // re-send the chosen loadout once we're actually connected to a squad, and
-// rebuild the picker now that we know the account's level/unlocks
-net.on('welcome', () => { buildLoadout(); pushLoadout(); });
-// a mission's rewards can unlock weapons / change rank — refresh the picker
-net.on('progress', () => buildLoadout());
+// rebuild the pickers now that we know the account's level/unlocks
+net.on('welcome', () => { buildLoadout(); buildDifficulty(); pushLoadout(); });
+// a mission's rewards can unlock weapons / change rank — refresh the pickers
+net.on('progress', () => { buildLoadout(); buildDifficulty(); });
+// the host changing difficulty (or a host handoff) arrives as a phase update
+net.on('phase', () => buildDifficulty());
 
 function enterGame() {
   inGame = true;

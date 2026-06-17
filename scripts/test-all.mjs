@@ -6,7 +6,7 @@
 
 import { spawn } from 'node:child_process';
 
-const TESTS = ['smoke', 'playthrough', 'boss', 'stratagems', 'dive', 'nests', 'loadout', 'progression'];
+const TESTS = ['smoke', 'playthrough', 'boss', 'stratagems', 'dive', 'nests', 'loadout', 'progression', 'difficulty'];
 const COOLDOWN_MS = 1200;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
