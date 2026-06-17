@@ -39,6 +39,31 @@ function pushLoadout() {
   game.setLoadout(pickWeapon, pickStrats);
 }
 
+// Galactic-war panel on the menu: the live campaign every squad pushes.
+type GalaxyLike = {
+  planets: { id: number; name: string; biome: string; liberation: number; liberated: boolean }[];
+  activePlanet: number; missionsWon: number; totalKills: number;
+} | null;
+function renderGalaxy(g: GalaxyLike) {
+  const panel = document.getElementById('galaxy')!;
+  if (!g || !g.planets) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  document.getElementById('galaxy-stats')!.textContent =
+    `${g.missionsWon} WON · ${g.totalKills.toLocaleString()} KILLS`;
+  document.getElementById('galaxy-planets')!.innerHTML = g.planets.map((p) => {
+    const active = p.id === g.activePlanet && !p.liberated;
+    const cls = 'planet' + (p.liberated ? ' liberated' : '') + (active ? ' active' : '');
+    const status = p.liberated ? 'LIBERATED' : `${Math.floor(p.liberation)}%`;
+    return `<div class="${cls}">
+      <div class="planet-row"><span>${p.name}${active ? ' ◂ FRONT' : ''}</span><span>${status}</span></div>
+      <div class="planet-bar"><div style="width:${p.liberation}%"></div></div>
+      <div class="planet-biome">${p.biome}</div>
+    </div>`;
+  }).join('');
+}
+// fetch once for the cold menu; refresh from live state once connected
+fetch('/galaxy').then((r) => r.json()).then(renderGalaxy).catch(() => {});
+
 // Difficulty picker (lobby). Only the host can change it; everyone sees the
 // selection. Tiers above the host's rank are locked.
 function buildDifficulty() {
@@ -185,6 +210,9 @@ net.on('welcome', () => { buildLoadout(); buildDifficulty(); pushLoadout(); });
 net.on('progress', () => { buildLoadout(); buildDifficulty(); });
 // the host changing difficulty (or a host handoff) arrives as a phase update
 net.on('phase', () => buildDifficulty());
+// galactic-war state: refresh the menu panel from live data
+net.on('welcome', () => renderGalaxy(net.galaxy));
+net.on('galaxy', () => renderGalaxy(net.galaxy));
 
 function enterGame() {
   inGame = true;

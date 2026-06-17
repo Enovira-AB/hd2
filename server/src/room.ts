@@ -57,6 +57,7 @@ import {
 } from '../../shared/world.js';
 import { hitscan, tickBugs, type ProjSpawn, type SBug, type SPlayer } from './sim.js';
 import { getProfile, saveProfile, type Profile } from './profiles.js';
+import { contributeWin, galaxyState } from './galaxy.js';
 
 interface SProjectile {
   id: number;
@@ -220,6 +221,7 @@ export class Room {
       mission: this.mission,
       players: this.playerStates(),
       profile: profileState(player),
+      galaxy: galaxyState(),
     });
     this.broadcast({ type: 'joined', player: this.playerState(player) }, ws);
     if (this.missionActive()) {
@@ -396,6 +398,13 @@ export class Room {
         breakdown,
         profile: profileState(p),
       });
+    }
+
+    // a victory pushes the galactic war forward; tell everyone the new state
+    if (won) {
+      const squadKills = [...this.players.values()].reduce((s, p) => s + p.kills, 0);
+      const gained = contributeWin(this.diff.xpMult, squadKills);
+      this.broadcast({ type: 'galaxy', galaxy: galaxyState(), gained });
     }
   }
 

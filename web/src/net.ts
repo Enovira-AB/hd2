@@ -5,6 +5,7 @@ import type {
   BugState,
   ClientMsg,
   FireZoneState,
+  GalaxyState,
   MissionState,
   PlayerState,
   ProfileState,
@@ -56,6 +57,8 @@ export class Net {
   connected = false;
   profile: ProfileState | null = null; // this account's latest progression snapshot
   lastProgress: Extract<ServerMsg, { type: 'progress' }> | null = null; // most recent mission rewards
+  galaxy: GalaxyState | null = null; // galactic-war state
+  lastGalaxyGain: { planet: number; liberation: number; liberated: boolean } | null = null;
 
   on(type: ServerMsg['type'], fn: Handler) {
     const list = this.handlers.get(type) ?? [];
@@ -90,6 +93,7 @@ export class Net {
           this.mission = msg.mission;
           this.latestPlayers = msg.players;
           this.profile = msg.profile;
+          this.galaxy = msg.galaxy;
           this.connected = true;
           this.startPing();
           settled = true;
@@ -125,6 +129,10 @@ export class Net {
       case 'progress':
         this.profile = msg.profile; // banked XP/level/unlocks after a mission
         this.lastProgress = msg;
+        break;
+      case 'galaxy':
+        this.galaxy = msg.galaxy; // a won mission pushed the front
+        this.lastGalaxyGain = msg.gained ?? null;
         break;
       case 'left':
         this.hostId = msg.host;

@@ -31,6 +31,21 @@ export interface PlayerState {
   level?: number; // account level (for squad display)
 }
 
+// The galactic war: a server-wide campaign every squad contributes to.
+export interface PlanetState {
+  id: number;
+  name: string;
+  biome: string;
+  liberation: number; // 0..100
+  liberated: boolean;
+}
+export interface GalaxyState {
+  planets: PlanetState[];
+  activePlanet: number; // id of the planet the front is currently on
+  missionsWon: number; // server lifetime
+  totalKills: number; // server lifetime
+}
+
 // A player's persistent account snapshot, sent on join and after each mission.
 export interface ProfileState {
   level: number;
@@ -139,6 +154,7 @@ export type ServerMsg =
       mission: MissionState;
       players: PlayerState[];
       profile: ProfileState; // the joining player's account
+      galaxy: GalaxyState; // current galactic-war state
     }
   | { type: 'error'; reason: string }
   | { type: 'joined'; player: PlayerState }
@@ -179,6 +195,13 @@ export type ServerMsg =
       unlockedNew: string[]; // weapon ids newly available
       breakdown: { label: string; xp: number }[];
       profile: ProfileState;
+    }
+  // galactic-war update: broadcast after a won mission contributes liberation,
+  // with what just changed so the client can highlight it.
+  | {
+      type: 'galaxy';
+      galaxy: GalaxyState;
+      gained?: { planet: number; liberation: number; liberated: boolean };
     }
   | { type: 'pong'; t: number; now: number };
 

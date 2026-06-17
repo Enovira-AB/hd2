@@ -372,12 +372,12 @@ export class Game {
       case 'COMPLETE':
         this.fx.shuttleDepart();
         window.setTimeout(() => {
-          this.hud.showSummary(this.net.mission!, this.net.latestPlayers, this.net.lastProgress);
+          this.hud.showSummary(this.net.mission!, this.net.latestPlayers, this.net.lastProgress, this.net.galaxy, this.net.lastGalaxyGain);
           this.onScreenChange('summary');
         }, 1400);
         break;
       case 'FAILED':
-        this.hud.showSummary(m, this.net.latestPlayers, this.net.lastProgress);
+        this.hud.showSummary(m, this.net.latestPlayers, this.net.lastProgress, this.net.galaxy, null);
         this.onScreenChange('summary');
         break;
       case 'LOBBY':

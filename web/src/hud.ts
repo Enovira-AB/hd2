@@ -1,9 +1,10 @@
 // DOM HUD: squad list, objective, ammo, stratagem uplink, banners, screens.
 
-import type { MissionState, PlayerState, ServerMsg } from '../../shared/protocol.js';
+import type { GalaxyState, MissionState, PlayerState, ServerMsg } from '../../shared/protocol.js';
 import { STRATAGEMS, difficultyById, weaponById } from '../../shared/constants.js';
 
 type Progress = Extract<ServerMsg, { type: 'progress' }>;
+type GalaxyGain = { planet: number; liberation: number; liberated: boolean } | null;
 
 const ARROW: Record<string, string> = { U: '▲', D: '▼', L: '◀', R: '▶' };
 
@@ -60,7 +61,13 @@ export class Hud {
     el('lobby-wait').classList.toggle('hidden', isHost);
   }
 
-  showSummary(mission: MissionState, players: PlayerState[], progress?: Progress | null) {
+  showSummary(
+    mission: MissionState,
+    players: PlayerState[],
+    progress?: Progress | null,
+    galaxy?: GalaxyState | null,
+    galaxyGain?: GalaxyGain,
+  ) {
     const won = mission.phase === 'COMPLETE';
     el('summary-title').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED';
     (el('summary-title') as HTMLElement).style.color = won ? 'var(--yellow)' : 'var(--red)';
@@ -69,6 +76,7 @@ export class Hud {
       ? 'DEMOCRACY HAS BEEN DELIVERED'
       : 'LIBERTY WEEPS — BUT SUPER EARTH REMEMBERS') + ` · ${diff}`;
     this.renderRewards(progress);
+    this.renderLiberation(galaxy, galaxyGain);
     el('summary-players').innerHTML = players
       .map((p) => `<li><span>${esc(p.name)}</span><span>${p.kills} KILLS</span></li>`)
       .join('');
@@ -100,6 +108,23 @@ export class Hud {
       <div class="rw-level">RANK ${level}</div>
       <div class="rw-bar"><div style="width:${pct}%"></div></div>
       ${unlocks}`;
+  }
+
+  private renderLiberation(galaxy?: GalaxyState | null, gain?: GalaxyGain) {
+    const box = el('summary-liberation');
+    if (!galaxy || !gain) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    const planet = galaxy.planets.find((p) => p.id === gain.planet);
+    const name = planet?.name ?? 'THE FRONT';
+    const pct = planet ? Math.floor(planet.liberation) : 0;
+    box.innerHTML = gain.liberated
+      ? `<div class="lib-name">${name} LIBERATED ★</div>`
+      : `<div class="lib-name">${name} — FRONT ADVANCED</div>
+         <div class="lib-bar"><div style="width:${pct}%"></div></div>
+         <div class="lib-pct">${pct}% LIBERATED</div>`;
   }
 
   // ---- in-game -----------------------------------------------------------------

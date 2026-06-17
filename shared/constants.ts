@@ -125,6 +125,20 @@ export function difficultyById(id: number): DifficultyDef {
   return DIFFICULTIES.find((d) => d.id === id) ?? DIFFICULTIES[1]; // default: CHALLENGING (×1)
 }
 
+// Galactic war: a persistent, server-wide campaign. Every completed mission
+// liberates a slice of the active planet; harder tiers push more. When a planet
+// hits 100% the front advances to the next. Shared by all squads on the server.
+export const PLANETS: { id: number; name: string; biome: string }[] = [
+  { id: 1, name: 'MERIDIA', biome: 'ASH WASTES' },
+  { id: 2, name: 'VANDALON IV', biome: 'FROZEN TUNDRA' },
+  { id: 3, name: 'HELLMIRE', biome: 'VOLCANIC SCARP' },
+  { id: 4, name: 'ESTANU', biome: 'TOXIC JUNGLE' },
+  { id: 5, name: 'CHOOHE', biome: 'DUST BOWL' },
+  { id: 6, name: 'TARSH', biome: 'IRRADIATED FLATS' },
+];
+
+export const GALAXY = { libPerMission: 4 } as const; // % liberated per win at ×1
+
 export interface BugKindDef {
   name: string;
   hp: number;
