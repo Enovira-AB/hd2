@@ -8,8 +8,9 @@ import {
   CHARGE,
   MAP_HALF,
   PROJECTILE,
-  RIFLE,
   TITAN_STOMP,
+  weaponById,
+  type WeaponDef,
 } from '../../shared/constants.js';
 import { terrainHeight, resolveCollisions, raycastRocks, type WorldLayout } from '../../shared/world.js';
 import { BUGFLAG, type Vec3, type HitKind } from '../../shared/protocol.js';
@@ -36,6 +37,8 @@ export interface SPlayer {
   diveReadyAt: number; // cooldown
   diveDx: number;
   diveDz: number;
+  weapon: WeaponDef; // equipped primary
+  loadout: string[]; // stratagem kinds brought this mission
 }
 
 export interface SBug {
@@ -296,12 +299,13 @@ export function hitscan(
   layout: WorldLayout,
   bugs: Iterable<SBug>,
   players: Iterable<SPlayer>,
+  range: number,
   nestHp?: number[],
 ): HitscanResult {
-  let best: HitscanResult = { dist: RIFLE.range, point: pointAt(origin, dir, RIFLE.range), kind: 'none' };
+  let best: HitscanResult = { dist: range, point: pointAt(origin, dir, range), kind: 'none' };
 
   const rockDist = raycastRocks(
-    seed, origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], RIFLE.range, layout.rocks,
+    seed, origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], range, layout.rocks,
   );
   if (rockDist < best.dist) {
     best = { dist: rockDist, point: pointAt(origin, dir, rockDist), kind: 'rock' };
@@ -329,7 +333,7 @@ export function hitscan(
 
   // coarse terrain march so misses still kick up dust where the round lands
   if (best.kind === 'none' && dir[1] < 0.15) {
-    for (let t = 6; t < RIFLE.range; t += 3) {
+    for (let t = 6; t < range; t += 3) {
       const x = origin[0] + dir[0] * t;
       const y = origin[1] + dir[1] * t;
       const z = origin[2] + dir[2] * t;

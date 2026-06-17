@@ -27,6 +27,7 @@ export interface PlayerState {
   reserve: number;
   kills: number;
   boarded: boolean;
+  weapon?: string; // equipped weapon id
 }
 
 export interface BugState {
@@ -107,6 +108,7 @@ export type ClientMsg =
   | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
   | { type: 'dive'; dir: Vec3 }
+  | { type: 'loadout'; weapon: string; stratagems: string[] } // chosen in the lobby
   | { type: 'reload' }
   | { type: 'stratagem'; kind: string; target: Vec3 }
   | { type: 'interact' }

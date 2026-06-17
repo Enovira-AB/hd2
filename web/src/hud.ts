@@ -13,10 +13,22 @@ export class Hud {
   private bannerTimer = 0;
 
   constructor() {
-    const list = el('strat-list');
-    list.innerHTML = Object.values(STRATAGEMS)
-      .map((s) => `<div>${s.label.toUpperCase()} <b>${[...s.code].map((c) => ARROW[c]).join(' ')}</b></div>`)
+    this.setStratList(Object.keys(STRATAGEMS));
+  }
+
+  // The in-game stratagem cheat-sheet lists only what you brought.
+  setStratList(kinds: string[]) {
+    el('strat-list').innerHTML = kinds
+      .filter((k) => k in STRATAGEMS)
+      .map((k) => {
+        const s = STRATAGEMS[k as keyof typeof STRATAGEMS];
+        return `<div>${s.label.toUpperCase()} <b>${[...s.code].map((c) => ARROW[c]).join(' ')}</b></div>`;
+      })
       .join('');
+  }
+
+  setWeapon(name: string) {
+    el('weapon-name').textContent = name;
   }
 
   // ---- screens ----------------------------------------------------------------

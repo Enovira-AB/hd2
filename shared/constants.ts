@@ -35,6 +35,35 @@ export const RIFLE = {
   reloadTime: 2.2,
 } as const;
 
+// Primary weapons. The rifle keeps RIFLE's stats so existing behaviour/tests
+// are unchanged when no loadout is chosen.
+export interface WeaponDef {
+  id: string;
+  name: string;
+  damage: number;
+  magSize: number;
+  reserveMax: number;
+  fireInterval: number; // seconds between shots
+  range: number;
+  reloadTime: number;
+  spread: number; // radians of cone (per pellet)
+  pellets: number; // >1 for shotguns
+  auto: boolean; // hold to fire vs tap
+  unlockLevel: number;
+}
+
+export const WEAPONS: WeaponDef[] = [
+  { id: 'rifle', name: 'AR-23 Liberator', damage: 34, magSize: 30, reserveMax: 240, fireInterval: 0.1, range: 140, reloadTime: 2.2, spread: 0.012, pellets: 1, auto: true, unlockLevel: 0 },
+  { id: 'smg', name: 'MP-98 Knight', damage: 22, magSize: 45, reserveMax: 270, fireInterval: 0.07, range: 80, reloadTime: 1.9, spread: 0.03, pellets: 1, auto: true, unlockLevel: 2 },
+  { id: 'shotgun', name: 'SG-8 Punisher', damage: 15, magSize: 8, reserveMax: 64, fireInterval: 0.5, range: 36, reloadTime: 2.8, spread: 0.11, pellets: 9, auto: false, unlockLevel: 3 },
+  { id: 'mg', name: 'MG-43 Stalwart', damage: 30, magSize: 100, reserveMax: 400, fireInterval: 0.055, range: 120, reloadTime: 4.2, spread: 0.05, pellets: 1, auto: true, unlockLevel: 5 },
+  { id: 'sniper', name: 'R-63 Diligence', damage: 115, magSize: 12, reserveMax: 96, fireInterval: 0.34, range: 250, reloadTime: 2.6, spread: 0.002, pellets: 1, auto: false, unlockLevel: 7 },
+];
+
+export function weaponById(id: string): WeaponDef {
+  return WEAPONS.find((w) => w.id === id) ?? WEAPONS[0];
+}
+
 export interface BugKindDef {
   name: string;
   hp: number;

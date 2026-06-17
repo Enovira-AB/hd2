@@ -88,6 +88,23 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #menu-error { color: var(--red); font-size: 13px; letter-spacing: 0.15em; margin-top: 14px; min-height: 18px; }
 
 #lobby-code { font-size: clamp(56px, 14vw, 110px); }
+
+#loadout { display: flex; gap: 16px; justify-content: center; margin: 14px 0 4px; flex-wrap: wrap; }
+.loadout-col { text-align: left; min-width: 230px; }
+.loadout-head { font-size: 10px; letter-spacing: 0.3em; color: var(--yellow); opacity: 0.8; margin-bottom: 6px; }
+#strat-count { opacity: 0.6; }
+.pick {
+  display: block; width: 100%; text-align: left;
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);
+  border-left: 3px solid transparent;
+  color: var(--text); padding: 7px 11px; margin: 4px 0; cursor: pointer;
+  font-size: 12px; letter-spacing: 0.06em;
+}
+.pick:hover { border-color: rgba(255,217,74,0.3); }
+.pick.on { border-left-color: var(--yellow); background: rgba(255,217,74,0.08); color: #fff; }
+.pick .sub { display: block; font-size: 9px; opacity: 0.5; letter-spacing: 0.1em; margin-top: 2px; }
+.pick.locked { opacity: 0.35; cursor: not-allowed; }
+.pick .arrows { color: var(--yellow); letter-spacing: 0.15em; }
 #lobby-players, #summary-players { list-style: none; margin: 18px 0; }
 #lobby-players li, #summary-players li {
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -146,6 +163,7 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #objective-sub { font-size: 11px; letter-spacing: 0.18em; opacity: 0.85; margin-top: 4px; }
 
 #status { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); text-align: right; }
+#weapon-name { font-size: 10px; letter-spacing: 0.18em; color: var(--yellow); opacity: 0.85; margin-bottom: 2px; text-shadow: 0 1px 2px #000; }
 #ammo { font-size: 30px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px #000; letter-spacing: 0.06em; }
 #ammo-sep { opacity: 0.4; margin: 0 6px; }
 #ammo-reserve { font-size: 18px; opacity: 0.75; }

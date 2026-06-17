@@ -4,6 +4,7 @@ import {
   type BugState,
   type ClientMsg,
   type FireZoneState,
+  type HitKind,
   type MissionObjective,
   type MissionState,
   type NestState,
@@ -30,13 +31,14 @@ import {
   RECON,
   REGEN_DELAY_S,
   REGEN_PER_S,
-  RIFLE,
   SENTRY,
   SPEED_TOLERANCE,
   SPRINT_SPEED,
   STRATAGEMS,
   TICK_RATE,
+  WEAPONS,
   spawnWeights,
+  weaponById,
   type StratagemKind,
 } from '../../shared/constants.js';
 import {
@@ -160,6 +162,7 @@ export class Room {
     }
     const id = (nextEntityId++).toString(36) + Math.floor(this.rng() * 36).toString(36);
     const spawn = this.spawnPoint();
+    const weapon = WEAPONS[0];
     const player: SPlayer = {
       id,
       name: name.slice(0, 16) || 'Helldiver',
@@ -168,8 +171,8 @@ export class Room {
       pitch: 0,
       anim: 0,
       hp: PLAYER_MAX_HP,
-      ammo: RIFLE.magSize,
-      reserve: RIFLE.reserveMax,
+      ammo: weapon.magSize,
+      reserve: weapon.reserveMax,
       kills: 0,
       alive: true,
       boarded: false,
@@ -182,6 +185,8 @@ export class Room {
       diveReadyAt: 0,
       diveDx: 0,
       diveDz: 0,
+      weapon,
+      loadout: ['REINFORCE', 'ORBITAL', 'RESUPPLY', 'SENTRY'],
     };
     this.sockets.set(ws, player);
     this.players.set(id, player);
@@ -227,6 +232,9 @@ export class Room {
         break;
       case 'dive':
         this.handleDive(player, msg.dir);
+        break;
+      case 'loadout':
+        this.handleLoadout(player, msg.weapon, msg.stratagems);
         break;
       case 'fire':
         this.handleFire(player, msg.origin, msg.dir);
@@ -297,8 +305,8 @@ export class Room {
   private resetPlayer(p: SPlayer, pos: Vec3) {
     p.pos = pos;
     p.hp = PLAYER_MAX_HP;
-    p.ammo = RIFLE.magSize;
-    p.reserve = RIFLE.reserveMax;
+    p.ammo = p.weapon.magSize;
+    p.reserve = p.weapon.reserveMax;
     p.alive = true;
     p.boarded = false;
     p.anim = 0;
@@ -357,6 +365,16 @@ export class Room {
     p.anim = (anim & ~ANIM.DEAD) | (p.alive ? 0 : ANIM.DEAD);
   }
 
+  // Chosen in the lobby; takes effect on the next drop. Ignored mid-mission so
+  // you can't swap weapons in the field.
+  private handleLoadout(p: SPlayer, weapon: string, stratagems: string[]) {
+    if (this.missionActive()) return;
+    p.weapon = weaponById(weapon);
+    const valid = stratagems.filter((s) => s in STRATAGEMS);
+    p.loadout = valid.length ? Array.from(new Set(['REINFORCE', ...valid])).slice(0, 5) : p.loadout;
+    if (p.ammo > p.weapon.magSize) p.ammo = p.weapon.magSize;
+  }
+
   private handleDive(p: SPlayer, dir: Vec3) {
     const now = Date.now();
     if (!p.alive || p.boarded || !this.missionActive()) return;
@@ -370,9 +388,10 @@ export class Room {
 
   private handleFire(p: SPlayer, origin: Vec3, dir: Vec3) {
     const now = Date.now();
+    const w = p.weapon;
     if (!p.alive || p.boarded || !this.missionActive()) return;
     if (now < p.reloadEndAt || p.ammo <= 0) return;
-    if (now - p.lastFireAt < RIFLE.fireInterval * 800) return;
+    if (now - p.lastFireAt < w.fireInterval * 800) return;
     p.lastFireAt = now;
     p.ammo--;
 
@@ -382,38 +401,47 @@ export class Room {
     const off = Math.hypot(origin[0] - eye[0], origin[1] - eye[1], origin[2] - eye[2]);
     const o = off < 3 ? origin : eye;
 
-    const hit = hitscan(
-      p, o, d, this.mission.seed, this.layout, this.bugs.values(), this.players.values(), this.nestHp,
-    );
-    if (hit.kind === 'bug' && hit.bug) {
-      hit.bug.hp -= RIFLE.damage;
-      hit.bug.aggro = true;
-      if (hit.bug.hp <= 0) this.killBug(hit.bug, p);
-    } else if (hit.kind === 'player' && hit.player) {
-      this.damagePlayer(hit.player, RIFLE.damage); // friendly fire: a Helldivers tradition
-    } else if (hit.kind === 'nest' && hit.nestIndex !== undefined) {
-      this.damageNest(hit.nestIndex, RIFLE.damage);
+    // one hitscan per pellet (shotguns), each with cone spread
+    let primary: { hit: Vec3 | null; kind: HitKind } = { hit: null, kind: 'none' };
+    for (let i = 0; i < w.pellets; i++) {
+      const pd = w.spread > 0 ? spreadDir(d, w.spread) : d;
+      const hit = hitscan(
+        p, o, pd, this.mission.seed, this.layout, this.bugs.values(), this.players.values(), w.range, this.nestHp,
+      );
+      if (hit.kind === 'bug' && hit.bug) {
+        hit.bug.hp -= w.damage;
+        hit.bug.aggro = true;
+        if (hit.bug.hp <= 0) this.killBug(hit.bug, p);
+      } else if (hit.kind === 'player' && hit.player) {
+        this.damagePlayer(hit.player, w.damage); // friendly fire: a Helldivers tradition
+      } else if (hit.kind === 'nest' && hit.nestIndex !== undefined) {
+        this.damageNest(hit.nestIndex, w.damage);
+      }
+      if (i === 0 || (hit.kind !== 'none' && primary.kind === 'none')) {
+        primary = { hit: hit.kind === 'none' ? null : hit.point, kind: hit.kind };
+      }
     }
     this.broadcast({
       type: 'fired',
       id: p.id,
       origin: o,
       dir: d,
-      hit: hit.kind === 'none' ? null : hit.point,
-      hitKind: hit.kind,
+      hit: primary.hit,
+      hitKind: primary.kind,
     });
   }
 
   private handleReload(p: SPlayer) {
     const now = Date.now();
-    if (!p.alive || p.pendingReload || p.ammo >= RIFLE.magSize || p.reserve <= 0) return;
+    if (!p.alive || p.pendingReload || p.ammo >= p.weapon.magSize || p.reserve <= 0) return;
     p.pendingReload = true;
-    p.reloadEndAt = now + RIFLE.reloadTime * 1000;
+    p.reloadEndAt = now + p.weapon.reloadTime * 1000;
   }
 
   private handleStratagem(p: SPlayer, kind: string, target: Vec3) {
     if (!p.alive || p.boarded || !this.missionActive()) return;
     if (!(kind in STRATAGEMS)) return;
+    if (!p.loadout.includes(kind)) return; // only what you brought
     const k = kind as StratagemKind;
     if (k === 'REINFORCE') {
       const anyDead = [...this.players.values()].some((q) => !q.alive);
@@ -434,7 +462,7 @@ export class Room {
     for (const s of this.supplies.values()) {
       if (Math.hypot(s.pos[0] - p.pos[0], s.pos[2] - p.pos[2]) < 2.4 && s.charges > 0) {
         s.charges--;
-        p.reserve = RIFLE.reserveMax;
+        p.reserve = p.weapon.reserveMax;
         p.hp = Math.min(PLAYER_MAX_HP, p.hp + 25);
         if (s.charges <= 0) this.supplies.delete(s.id);
         return;
@@ -559,7 +587,7 @@ export class Room {
       for (const p of players) {
         if (p.pendingReload && now >= p.reloadEndAt) {
           p.pendingReload = false;
-          const take = Math.min(RIFLE.magSize - p.ammo, p.reserve);
+          const take = Math.min(p.weapon.magSize - p.ammo, p.reserve);
           p.ammo += take;
           p.reserve -= take;
         }
@@ -611,8 +639,8 @@ export class Room {
           p.pos = [x, terrainHeight(this.mission.seed, x, z), z];
           p.alive = true;
           p.hp = PLAYER_MAX_HP;
-          p.ammo = RIFLE.magSize;
-          p.reserve = Math.max(p.reserve, RIFLE.reserveMax / 2);
+          p.ammo = p.weapon.magSize;
+          p.reserve = Math.max(p.reserve, p.weapon.reserveMax / 2);
           p.anim &= ~ANIM.DEAD;
           ids.push(p.id);
         }
@@ -836,6 +864,7 @@ export class Room {
       reserve: p.reserve,
       kills: p.kills,
       boarded: p.boarded,
+      weapon: p.weapon.id,
     };
   }
 
@@ -921,4 +950,20 @@ export class Room {
 
 function bugY(seed: number, bug: SBug): number {
   return terrainHeight(seed, bug.x, bug.z) + BUG_KINDS[bug.kind].radius * 0.9;
+}
+
+// Perturb a unit direction within a cone of half-angle `spread` radians.
+function spreadDir(d: Vec3, spread: number): Vec3 {
+  const up: Vec3 = Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  let ex: Vec3 = [d[1] * up[2] - d[2] * up[1], d[2] * up[0] - d[0] * up[2], d[0] * up[1] - d[1] * up[0]];
+  const el = Math.hypot(...ex) || 1;
+  ex = [ex[0] / el, ex[1] / el, ex[2] / el];
+  const uy: Vec3 = [d[1] * ex[2] - d[2] * ex[1], d[2] * ex[0] - d[0] * ex[2], d[0] * ex[1] - d[1] * ex[0]];
+  const a = Math.random() * Math.PI * 2;
+  const r = spread * Math.sqrt(Math.random());
+  const ox = Math.cos(a) * r;
+  const oy = Math.sin(a) * r;
+  const n: Vec3 = [d[0] + ex[0] * ox + uy[0] * oy, d[1] + ex[1] * ox + uy[1] * oy, d[2] + ex[2] * ox + uy[2] * oy];
+  const nl = Math.hypot(...n) || 1;
+  return [n[0] / nl, n[1] / nl, n[2] / nl];
 }

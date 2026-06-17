@@ -33,6 +33,7 @@
 
     <div id="status">
       <div id="hp-bar"><div id="hp-fill"></div></div>
+      <div id="weapon-name"></div>
       <div id="ammo"><span id="ammo-mag">30</span><span id="ammo-sep">|</span><span id="ammo-reserve">240</span></div>
     </div>
 
@@ -101,6 +102,18 @@
       <h1 id="lobby-code">····</h1>
       <p class="hint">share this code (or the page URL) — squadmates can drop in mid-mission</p>
       <ul id="lobby-players"></ul>
+
+      <div id="loadout">
+        <div class="loadout-col">
+          <div class="loadout-head">PRIMARY</div>
+          <div id="weapon-list"></div>
+        </div>
+        <div class="loadout-col">
+          <div class="loadout-head">STRATAGEMS <span id="strat-count"></span></div>
+          <div id="strat-list-pick"></div>
+        </div>
+      </div>
+
       <button id="btn-start" class="big-btn hidden">DEPLOY ⬇</button>
       <p id="lobby-wait" class="hint">waiting for host to deploy…</p>
     </div>

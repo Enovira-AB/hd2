@@ -10,6 +10,7 @@ import { Sfx } from './sfx.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
 import { preloadModels } from './models.js';
+import { STRATAGEMS, WEAPONS } from '../../shared/constants.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 preloadModels(); // optional drop-in GLBs; procedural fallback otherwise
@@ -25,6 +26,56 @@ let inGame = false;
 
 // demo world behind the menu
 world.buildWorld(1337);
+
+// ---- loadout picker (lobby) ---------------------------------------------------
+const ARROWS: Record<string, string> = { U: '▲', D: '▼', L: '◀', R: '▶' };
+const STRAT_SLOTS = 3; // chosen stratagems besides the always-equipped Reinforce
+let pickWeapon = localStorage.getItem('weapon') ?? WEAPONS[0].id;
+let pickStrats: string[] = JSON.parse(localStorage.getItem('strats') ?? '["ORBITAL","RESUPPLY","SENTRY"]');
+
+function pushLoadout() {
+  localStorage.setItem('weapon', pickWeapon);
+  localStorage.setItem('strats', JSON.stringify(pickStrats));
+  game.setLoadout(pickWeapon, pickStrats);
+}
+
+function buildLoadout() {
+  const wl = document.getElementById('weapon-list')!;
+  wl.innerHTML = '';
+  for (const w of WEAPONS) {
+    const b = document.createElement('button');
+    b.className = 'pick' + (w.id === pickWeapon ? ' on' : '');
+    const fireMode = w.auto ? 'auto' : 'semi';
+    const dps = Math.round((w.damage * w.pellets) / w.fireInterval);
+    b.innerHTML = `${w.name}<span class="sub">${w.damage}×${w.pellets} · ${fireMode} · ${w.range}m · ~${dps} dps</span>`;
+    b.onclick = () => { pickWeapon = w.id; buildLoadout(); pushLoadout(); };
+    wl.appendChild(b);
+  }
+  const sl = document.getElementById('strat-list-pick')!;
+  sl.innerHTML = '';
+  const reinforce = { key: 'REINFORCE', ...STRATAGEMS.REINFORCE };
+  const others = Object.entries(STRATAGEMS).filter(([k]) => k !== 'REINFORCE');
+  const render = (key: string, s: { code: string; label: string }, locked: boolean, on: boolean) => {
+    const b = document.createElement('button');
+    b.className = 'pick' + (on ? ' on' : '') + (locked ? ' locked' : '');
+    const arrows = [...s.code].map((c) => ARROWS[c]).join(' ');
+    b.innerHTML = `${s.label.toUpperCase()} <span class="sub"><span class="arrows">${arrows}</span></span>`;
+    if (!locked) {
+      b.onclick = () => {
+        if (pickStrats.includes(key)) pickStrats = pickStrats.filter((x) => x !== key);
+        else if (pickStrats.length < STRAT_SLOTS) pickStrats.push(key);
+        buildLoadout();
+        pushLoadout();
+      };
+    }
+    sl.appendChild(b);
+  };
+  render('REINFORCE', reinforce, true, true); // always equipped
+  for (const [k, s] of others) render(k, s, false, pickStrats.includes(k));
+  document.getElementById('strat-count')!.textContent = `${1 + pickStrats.length}/4`;
+}
+buildLoadout();
+pushLoadout();
 
 // unlock audio on the first gesture (iOS requirement)
 const unlock = () => sfx.ensure();
@@ -76,6 +127,9 @@ document.getElementById('btn-start')!.addEventListener('click', () => net.send({
 function updateLobby() {
   hud.updateLobby(net.latestPlayers, net.selfId, net.hostId, net.room);
 }
+
+// re-send the chosen loadout once we're actually connected to a squad
+net.on('welcome', () => pushLoadout());
 
 function enterGame() {
   inGame = true;

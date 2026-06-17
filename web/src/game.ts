@@ -17,8 +17,8 @@ import {
 } from './models.js';
 import { ANIM, BUGFLAG, type MissionPhase, type Vec3 } from '../../shared/protocol.js';
 import {
-  DIVE, MISSION, ORBITAL_RADIUS, PROJECTILE, RIFLE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED,
-  type StratagemKind,
+  DIVE, MISSION, ORBITAL_RADIUS, PROJECTILE, SPRINT_SPEED, STRATAGEMS, WALK_SPEED, WEAPONS,
+  weaponById, type StratagemKind, type WeaponDef,
 } from '../../shared/constants.js';
 import { resolveCollisions } from '../../shared/world.js';
 
@@ -87,8 +87,10 @@ export class Game {
   private vel = new THREE.Vector3();
   private alive = true;
   private boarded = false;
-  private localAmmo: number = RIFLE.magSize;
-  private localReserve: number = RIFLE.reserveMax;
+  weapon: WeaponDef = WEAPONS[0];
+  loadout: string[] = ['REINFORCE', 'ORBITAL', 'RESUPPLY', 'SENTRY'];
+  private localAmmo: number = WEAPONS[0].magSize;
+  private localReserve: number = WEAPONS[0].reserveMax;
   private reloadUntil = 0;
   private diveUntil = 0;
   private diveReadyAt = 0;
@@ -128,6 +130,18 @@ export class Game {
 
   private selfState() {
     return this.net.latestPlayers.find((p) => p.id === this.net.selfId);
+  }
+
+  // Set in the lobby loadout screen; server applies it on the next drop.
+  setLoadout(weaponId: string, stratagems: string[]) {
+    this.weapon = weaponById(weaponId);
+    this.loadout = Array.from(new Set(['REINFORCE', ...stratagems])).slice(0, 5);
+    if (!this.active()) {
+      this.localAmmo = this.weapon.magSize;
+      this.localReserve = this.weapon.reserveMax;
+    }
+    this.hud.setStratList(this.loadout);
+    this.net.send({ type: 'loadout', weapon: weaponId, stratagems: this.loadout });
   }
 
   private active(): boolean {
@@ -323,8 +337,8 @@ export class Game {
         this.fx.shuttleHide();
         this.boarded = false;
         this.alive = true;
-        this.localAmmo = RIFLE.magSize;
-        this.localReserve = RIFLE.reserveMax;
+        this.localAmmo = this.weapon.magSize;
+        this.localReserve = this.weapon.reserveMax;
         const self = this.selfState();
         if (self) this.pos.set(...self.pos);
         for (const p of this.net.latestPlayers) {
@@ -442,7 +456,8 @@ export class Game {
     for (const a of arrows) {
       this.stratSeq += a;
       this.sfx.beep(false);
-      const entries = Object.entries(STRATAGEMS) as [StratagemKind, { code: string }][];
+      const entries = (Object.entries(STRATAGEMS) as [StratagemKind, { code: string }][])
+        .filter(([k]) => this.loadout.includes(k)); // only what you brought
       const exact = entries.find(([, s]) => s.code === this.stratSeq);
       const prefix = entries.some(([, s]) => s.code.startsWith(this.stratSeq));
       if (exact) {
@@ -599,7 +614,7 @@ export class Game {
     }
     if (now < this.nextFireAt || now < this.reloadUntil) return;
 
-    this.nextFireAt = now + RIFLE.fireInterval * 1000;
+    this.nextFireAt = now + this.weapon.fireInterval * 1000;
     this.localAmmo--;
 
     const cam = this.world.camera;
@@ -632,9 +647,9 @@ export class Game {
 
   private tryReload(now: number) {
     if (!this.alive || now < this.reloadUntil) return;
-    if (this.localAmmo >= RIFLE.magSize || this.localReserve <= 0) return;
+    if (this.localAmmo >= this.weapon.magSize || this.localReserve <= 0) return;
     this.net.send({ type: 'reload' });
-    this.reloadUntil = now + RIFLE.reloadTime * 1000;
+    this.reloadUntil = now + this.weapon.reloadTime * 1000;
     this.sfx.reload();
   }
 
@@ -723,6 +738,7 @@ export class Game {
           this.localAmmo = p.ammo;
         }
         this.localReserve = p.reserve;
+        if (p.weapon && p.weapon !== this.weapon.id) this.weapon = weaponById(p.weapon);
         this.boarded = p.boarded;
 
         view.group.position.copy(this.pos);
@@ -895,6 +911,7 @@ export class Game {
     const m = this.net.mission!;
     const self = this.selfState();
     this.hud.updateSquad(this.net.latestPlayers, this.net.selfId);
+    this.hud.setWeapon(this.weapon.name);
     this.hud.setAmmo(this.localAmmo, this.localReserve);
     this.hud.setHp(self?.hp ?? 100);
 
