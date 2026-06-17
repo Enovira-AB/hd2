@@ -85,15 +85,19 @@ Behavioral intent (port these *feels*, not just the numbers):
 Called by punching an arrow code (`U/D/L/R`), then a beacon is thrown where you
 aim; it resolves after a short delay. Friendly fire applies to the offensive ones.
 
+You bring a fixed loadout of stratagems (chosen in the lobby, see §7); the
+server rejects any you did not bring. Codes are `U/D/L/R` arrow sequences.
+
 | Stratagem | Code | Effect |
 |---|---|---|
-| Reinforce | ▲▼▶◀▲ | revive downed squadmates (shared budget) |
+| Reinforce | ▲▼▶◀▲ | revive downed squadmates (shared budget); always equipped |
 | Orbital Strike | ▶▶▲ | one big AOE blast (radius 9, ~420 dmg, falloff) |
 | Resupply | ▼▼▲▶ | drops a supply pod (4 charges: refill reserve + heal) |
+| Sentry Gun | ▼▲▶▲ | auto-turret: tracks and fires on bugs in range, limited lifetime |
+| Napalm Barrage | ▶▶▼▲ | burning area-denial zone (DPS over time, friendly fire) |
+| Recon Pulse | ▲▲▼ | pings enemies through the dark — synergizes with the night hook |
 
-**Roadmap stratagems** (designed, not yet built): Sentry Gun (auto-turret),
-Napalm Barrage (burning area denial), Recon Pulse (pings enemies through the
-dark — synergizes with the night hook), Shield Bubble (defensive dome).
+**Roadmap stratagems** (designed, not yet built): Shield Bubble (defensive dome).
 
 ---
 
@@ -102,7 +106,8 @@ dark — synergizes with the night hook), Shield Bubble (defensive dome).
 `LOBBY → DROP → KILL → EXTRACT → DEFEND → BOARD → COMPLETE | FAILED → LOBBY`
 
 - **DROP** — hellpods land the squad (≈3 s).
-- **KILL** — eradicate a quota (`15 + 10·(players−1)`); the titan arrives at 50%.
+- **KILL** — eradicate a quota (`15 + 10·(players−1)`, then ×difficulty); the
+  titan arrives at 50%. (Or, for the **NESTS** objective, seal every bug nest.)
 - **EXTRACT** — reach and activate the extraction beacon.
 - **DEFEND** — hold the pad until the shuttle arrives (≈75 s, spawn rate up).
 - **BOARD** — board before the shuttle leaves (grace ≈18 s).
@@ -118,9 +123,13 @@ defend a drilling rig, retrieve & carry data — instead of only a kill quota.
 
 ## 6. Combat & systems
 
-- **Weapon (rifle):** 34 dmg, 30 mag / 240 reserve, 600 rpm, 140 m, 2.2 s reload.
-  Hitscan, server-validated. Movement is client-authoritative but speed- and
-  collision-checked server-side (PvE: responsiveness over anti-cheat).
+- **Primary weapons (`WEAPONS`):** five hitscan primaries, each with damage,
+  mag/reserve, fire interval, range, reload, cone spread, pellet count and an
+  `unlockLevel` (see §7). The shotgun fires multiple pellets, each its own
+  hitscan with cone spread; rifles stay tight. The rifle keeps the original
+  stats so default behaviour is unchanged. Server fires one hitscan **per
+  pellet** and applies per-weapon range. Movement is client-authoritative but
+  speed- and collision-checked server-side (PvE: responsiveness over anti-cheat).
 - **Projectiles:** server-authoritative acid globs, gravity 9.5, speed 27,
   lead-aimed; carried in snapshots with velocity so clients extrapolate the
   fast arc between the 15 Hz frames.
@@ -131,7 +140,44 @@ defend a drilling rig, retrieve & carry data — instead of only a kill quota.
 
 ---
 
-## 7. The night (atmosphere as identity)
+## 7. Progression & meta
+
+All of this is **server-authoritative** and persisted server-side; clients only
+display it. Accounts are keyed by a client-generated id (`pid`) sent on join.
+
+- **Loadout (lobby).** Before a drop each player picks a primary weapon and up
+  to 3 stratagems (Reinforce is always equipped). Sent as a `loadout` message;
+  ignored mid-mission. The server refuses weapons/stratagems the account hasn't
+  unlocked or didn't bring. Persisted client-side (localStorage); re-sent on
+  join.
+- **XP & levels (`PROGRESSION`, `xpToNext`/`levelForXp`).** Kills (per enemy
+  kind), sealed nests and mission completion grant XP; a failed mission still
+  banks a fraction of combat XP. XP raises an account level. Accounts start at
+  rank 1.
+- **Unlocks.** Each weapon has an `unlockLevel`; difficulty tiers unlock with
+  rank too. The server validates — the gate can't be bypassed by a client.
+- **Persistence.** Profiles are stored in `server/data/profiles.json` (one JSON
+  array, debounced atomic writes, flushed on shutdown). `HD_DATA_DIR` overrides
+  the location. The `welcome` message returns the account; a post-mission
+  `progress` message delivers the XP breakdown, level-ups and new unlocks.
+- **Difficulty tiers (`DIFFICULTIES`).** Five tiers (Trivial → Helldive). The
+  host picks one in the lobby (`difficulty` message, gated by host rank). Each
+  tier is a set of multipliers — enemy cap, spawn rate, enemy HP, enemy damage,
+  a heavy-bias on the spawn table, the kill quota and the XP payout. The
+  baseline tier (Challenging) is ×1 so the default game is unchanged.
+- **Galactic war (`PLANETS`, `GALAXY`).** One persistent, server-wide campaign
+  every squad pushes. A completed mission liberates a slice of the active planet
+  (scaled by the tier's reward multiplier); at 100% the front advances. Stored
+  in `server/data/galaxy.json`; exposed read-only at `GET /galaxy` (so the menu
+  can show it before joining) and broadcast as a `galaxy` message after each win.
+
+Wire additions for a port: client→server `loadout`, `difficulty`; server→client
+`progress`, `galaxy`; `welcome` now carries `profile` + `galaxy`; `MissionState`
+carries `difficulty`; `PlayerState` carries `weapon` + `level`.
+
+---
+
+## 8. The night (atmosphere as identity)
 
 - Dark exponential fog, moonlight + per-soldier flashlights, bloom, ACES,
   film grain, a dead red planet on the horizon, aurora curtains.
@@ -146,9 +192,10 @@ Recon Pulse to "see" through the dark.
 
 ---
 
-## 8. Portability map — bringing this to Unity / Unreal
+## 9. Portability map — bringing this to Unity / Unreal
 
-**What transfers cleanly:** §3–§6 are pure rules. The biggest porting risk is
+**What transfers cleanly:** §3–§7 are pure rules (progression/meta included —
+it's all server-authoritative data + formulas). The biggest porting risk is
 keeping the world **deterministic** so server and every client agree on terrain.
 
 `shared/world.ts` uses 32-bit integer hashing (`mulberry32`, value noise). Port
@@ -179,13 +226,18 @@ audio synthesis (engines have middleware), input, HUD.
 
 ---
 
-## 9. Roadmap (web is the proving ground)
+## 10. Roadmap (web is the proving ground)
 
-1. New stratagems (Sentry, Napalm, Recon Pulse) + dive/dodge roll.
-2. Objective variety (destroy nest, defend drill).
-3. Darkness mechanics (limited vision, light-attracts).
-4. Real models for the remaining procedural enemies (scavenger, spitter, titan).
+**Done:** new stratagems (Sentry, Napalm, Recon) + dive/dodge roll · objective
+variety (destroy nests) · weapons + lobby loadout · XP/levels/unlocks +
+account persistence · difficulty tiers · galactic-war meta layer.
+
+**Next:**
+
+1. Darkness mechanics (limited vision, light-attracts-enemies).
+2. Real models for the remaining procedural enemies (scavenger, spitter, titan).
+3. More objective variety (defend a drill, retrieve & carry data).
+4. Ship/loadout depth: stratagem upgrades, armor passives, secondary weapons.
 5. Binary snapshots + delta compression past 4 players.
-6. Persistence/meta: loadouts, ship upgrades, a galactic-war layer.
-7. **Engine port** (Unity recommended as the pragmatic jump) once the design is
+6. **Engine port** (Unity recommended as the pragmatic jump) once the design is
    locked — following this document and `ios/PORTING.md`.
