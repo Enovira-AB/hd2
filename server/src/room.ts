@@ -9,6 +9,7 @@ import {
   type MissionState,
   type NestState,
   type PlayerState,
+  type ProfileState,
   type ProjectileState,
   type SentryState,
   type ServerMsg,
@@ -27,6 +28,7 @@ import {
   ORBITAL_RADIUS,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
+  PROGRESSION,
   PROJECTILE,
   RECON,
   REGEN_DELAY_S,
@@ -37,7 +39,9 @@ import {
   STRATAGEMS,
   TICK_RATE,
   WEAPONS,
+  levelForXp,
   spawnWeights,
+  unlockedWeapons,
   weaponById,
   type StratagemKind,
 } from '../../shared/constants.js';
@@ -50,6 +54,7 @@ import {
   type WorldLayout,
 } from '../../shared/world.js';
 import { hitscan, tickBugs, type ProjSpawn, type SBug, type SPlayer } from './sim.js';
+import { getProfile, saveProfile, type Profile } from './profiles.js';
 
 interface SProjectile {
   id: number;
@@ -121,6 +126,7 @@ export class Room {
   private rng: () => number;
   private nextSpawnAt = 0;
   private resetAt = 0;
+  private progressCommitted = false; // mission-end XP already banked
   private tickTimer: NodeJS.Timeout;
   private snapshotToggle = false;
   private lastTick = Date.now();
@@ -155,13 +161,15 @@ export class Room {
 
   // ---- lifecycle -----------------------------------------------------------
 
-  addPlayer(ws: WebSocket, name: string): SPlayer | null {
+  addPlayer(ws: WebSocket, name: string, pid?: string): SPlayer | null {
     if (this.players.size >= MAX_PLAYERS) {
       this.sendTo(ws, { type: 'error', reason: 'Squad is full' });
       return null;
     }
     const id = (nextEntityId++).toString(36) + Math.floor(this.rng() * 36).toString(36);
     const spawn = this.spawnPoint();
+    const profile = getProfile(sanitizePid(pid), name.slice(0, 16) || 'Helldiver');
+    const level = levelForXp(profile.xp).level;
     const weapon = WEAPONS[0];
     const player: SPlayer = {
       id,
@@ -187,6 +195,10 @@ export class Room {
       diveDz: 0,
       weapon,
       loadout: ['REINFORCE', 'ORBITAL', 'RESUPPLY', 'SENTRY'],
+      profile,
+      level,
+      mKillXp: 0,
+      mNestXp: 0,
     };
     this.sockets.set(ws, player);
     this.players.set(id, player);
@@ -199,6 +211,7 @@ export class Room {
       host: this.hostId,
       mission: this.mission,
       players: this.playerStates(),
+      profile: profileState(player),
     });
     this.broadcast({ type: 'joined', player: this.playerState(player) }, ws);
     if (this.missionActive()) {
@@ -293,6 +306,7 @@ export class Room {
     this.titanId = 0;
     this.titanSpawned = false;
     this.nextSpawnAt = now;
+    this.progressCommitted = false;
     let i = 0;
     for (const p of this.players.values()) {
       this.resetPlayer(p, this.spawnPoint(i++));
@@ -314,6 +328,8 @@ export class Room {
     p.kills = 0;
     p.diveUntil = 0;
     p.diveReadyAt = 0;
+    p.mKillXp = 0;
+    p.mNestXp = 0;
   }
 
   private spawnPoint(index = 0): Vec3 {
@@ -328,8 +344,46 @@ export class Room {
     this.mission.phaseEndsAt = endsInS > 0 ? Date.now() + endsInS * 1000 : 0;
     if (phase === 'COMPLETE' || phase === 'FAILED') {
       this.resetAt = Date.now() + M.resetDelayS * 1000;
+      this.commitProgress(phase === 'COMPLETE');
     }
     this.broadcastPhase();
+  }
+
+  // Bank each player's mission XP into their profile, recompute level, persist,
+  // and send a per-player rewards breakdown. Runs once per mission end.
+  private commitProgress(won: boolean) {
+    if (this.progressCommitted) return;
+    this.progressCommitted = true;
+    for (const p of this.players.values()) {
+      const before = levelForXp(p.profile.xp).level;
+      const completion = won ? PROGRESSION.missionXp : 0;
+      const combat = p.mKillXp + p.mNestXp;
+      const gained = Math.round((won ? combat : combat * PROGRESSION.failXpFactor) + completion);
+
+      p.profile.xp += gained;
+      p.profile.kills += p.kills;
+      if (won) p.profile.missions += 1;
+      saveProfile(p.profile);
+
+      const after = levelForXp(p.profile.xp).level;
+      p.level = after;
+      const unlockedNew = after > before
+        ? unlockedWeapons(after).filter((id) => !unlockedWeapons(before).includes(id))
+        : [];
+      const breakdown = [
+        { label: 'Combat', xp: won ? combat : Math.round(combat * PROGRESSION.failXpFactor) },
+        { label: 'Mission', xp: completion },
+      ].filter((b) => b.xp > 0);
+
+      this.sendToPlayer(p, {
+        type: 'progress',
+        xpGained: gained,
+        leveledTo: after > before ? after : undefined,
+        unlockedNew,
+        breakdown,
+        profile: profileState(p),
+      });
+    }
   }
 
   private broadcastPhase() {
@@ -369,7 +423,9 @@ export class Room {
   // you can't swap weapons in the field.
   private handleLoadout(p: SPlayer, weapon: string, stratagems: string[]) {
     if (this.missionActive()) return;
-    p.weapon = weaponById(weapon);
+    // only equip a weapon the account has actually unlocked
+    const w = weaponById(weapon);
+    p.weapon = p.level >= w.unlockLevel ? w : WEAPONS[0];
     const valid = stratagems.filter((s) => s in STRATAGEMS);
     p.loadout = valid.length ? Array.from(new Set(['REINFORCE', ...valid])).slice(0, 5) : p.loadout;
     if (p.ammo > p.weapon.magSize) p.ammo = p.weapon.magSize;
@@ -415,7 +471,7 @@ export class Room {
       } else if (hit.kind === 'player' && hit.player) {
         this.damagePlayer(hit.player, w.damage); // friendly fire: a Helldivers tradition
       } else if (hit.kind === 'nest' && hit.nestIndex !== undefined) {
-        this.damageNest(hit.nestIndex, w.damage);
+        this.damageNest(hit.nestIndex, w.damage, p);
       }
       if (i === 0 || (hit.kind !== 'none' && primary.kind === 'none')) {
         primary = { hit: hit.kind === 'none' ? null : hit.point, kind: hit.kind };
@@ -622,7 +678,9 @@ export class Room {
           }
         }
         this.layout.nests.forEach((n, i) => {
-          if (Math.hypot(n.x - s.target[0], n.z - s.target[2]) <= ORBITAL_RADIUS) this.damageNest(i, ORBITAL_DAMAGE);
+          if (Math.hypot(n.x - s.target[0], n.z - s.target[2]) <= ORBITAL_RADIUS) {
+            this.damageNest(i, ORBITAL_DAMAGE, this.players.get(s.by) ?? null);
+          }
         });
       } else if (s.kind === 'RESUPPLY') {
         const id = nextEntityId++;
@@ -732,7 +790,10 @@ export class Room {
     this.bugs.delete(bug.id);
     const reward = BUG_KINDS[bug.kind].boss ? BOSS.killReward : 1;
     this.mission.kills += reward;
-    if (killer) killer.kills += reward;
+    if (killer) {
+      killer.kills += reward;
+      killer.mKillXp += PROGRESSION.killXp[bug.kind] ?? 1;
+    }
     if (bug.id === this.titanId) this.titanId = 0;
     this.broadcast({
       type: 'bugDeath',
@@ -743,12 +804,13 @@ export class Room {
     });
   }
 
-  private damageNest(i: number, dmg: number) {
+  private damageNest(i: number, dmg: number, killer?: SPlayer | null) {
     if (this.nestHp[i] === undefined || this.nestHp[i] <= 0) return;
     this.nestHp[i] -= dmg;
     if (this.nestHp[i] <= 0) {
       this.nestHp[i] = 0;
       this.mission.nestsLeft = this.nestHp.filter((h) => h > 0).length;
+      if (killer) killer.mNestXp += PROGRESSION.nestXp;
       const n = this.layout.nests[i];
       this.broadcast({
         type: 'nestDeath',
@@ -865,6 +927,7 @@ export class Room {
       kills: p.kills,
       boarded: p.boarded,
       weapon: p.weapon.id,
+      level: p.level,
     };
   }
 
@@ -940,6 +1003,10 @@ export class Room {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   }
 
+  private sendToPlayer(p: SPlayer, msg: ServerMsg) {
+    for (const [ws, q] of this.sockets) if (q === p) return this.sendTo(ws, msg);
+  }
+
   private broadcast(msg: ServerMsg, except?: WebSocket) {
     const raw = JSON.stringify(msg);
     for (const ws of this.sockets.keys()) {
@@ -950,6 +1017,27 @@ export class Room {
 
 function bugY(seed: number, bug: SBug): number {
   return terrainHeight(seed, bug.x, bug.z) + BUG_KINDS[bug.kind].radius * 0.9;
+}
+
+// Accept only a sane client id; fall back to a random one so a missing/garbage
+// pid still gets a working (if unclaimable) account for the session.
+function sanitizePid(pid?: string): string {
+  if (typeof pid === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(pid)) return pid;
+  return 'anon-' + Math.random().toString(36).slice(2, 14);
+}
+
+// Project a stored Profile into the wire snapshot the client renders.
+function profileState(p: SPlayer): ProfileState {
+  const lv = levelForXp(p.profile.xp);
+  return {
+    level: lv.level,
+    xp: p.profile.xp,
+    into: lv.into,
+    span: lv.span,
+    unlocked: unlockedWeapons(lv.level),
+    kills: p.profile.kills,
+    missions: p.profile.missions,
+  };
 }
 
 // Perturb a unit direction within a cone of half-angle `spread` radians.

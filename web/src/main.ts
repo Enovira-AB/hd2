@@ -10,7 +10,7 @@ import { Sfx } from './sfx.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
 import { preloadModels } from './models.js';
-import { STRATAGEMS, WEAPONS } from '../../shared/constants.js';
+import { STRATAGEMS, WEAPONS, weaponById } from '../../shared/constants.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 preloadModels(); // optional drop-in GLBs; procedural fallback otherwise
@@ -39,16 +39,41 @@ function pushLoadout() {
   game.setLoadout(pickWeapon, pickStrats);
 }
 
+// Account rank + XP bar in the lobby (hidden until we have a profile).
+function updateAccount() {
+  const acc = document.getElementById('account')!;
+  const p = net.profile;
+  if (!p) {
+    acc.classList.add('hidden');
+    return;
+  }
+  acc.classList.remove('hidden');
+  document.getElementById('account-rank')!.textContent = `RANK ${p.level}`;
+  document.getElementById('account-xp')!.textContent = `${p.into} / ${p.span} XP`;
+  const pct = Math.max(0, Math.min(100, (p.into / Math.max(1, p.span)) * 100));
+  (document.getElementById('account-fill') as HTMLElement).style.width = `${pct}%`;
+}
+
 function buildLoadout() {
+  const level = net.profile?.level ?? 1;
+  // can't keep a weapon the account hasn't unlocked
+  if (level < weaponById(pickWeapon).unlockLevel) pickWeapon = WEAPONS[0].id;
+  updateAccount();
+
   const wl = document.getElementById('weapon-list')!;
   wl.innerHTML = '';
   for (const w of WEAPONS) {
+    const locked = level < w.unlockLevel;
     const b = document.createElement('button');
-    b.className = 'pick' + (w.id === pickWeapon ? ' on' : '');
-    const fireMode = w.auto ? 'auto' : 'semi';
-    const dps = Math.round((w.damage * w.pellets) / w.fireInterval);
-    b.innerHTML = `${w.name}<span class="sub">${w.damage}×${w.pellets} · ${fireMode} · ${w.range}m · ~${dps} dps</span>`;
-    b.onclick = () => { pickWeapon = w.id; buildLoadout(); pushLoadout(); };
+    b.className = 'pick' + (w.id === pickWeapon ? ' on' : '') + (locked ? ' locked' : '');
+    if (locked) {
+      b.innerHTML = `${w.name}<span class="sub">🔒 UNLOCKS AT RANK ${w.unlockLevel}</span>`;
+    } else {
+      const fireMode = w.auto ? 'auto' : 'semi';
+      const dps = Math.round((w.damage * w.pellets) / w.fireInterval);
+      b.innerHTML = `${w.name}<span class="sub">${w.damage}×${w.pellets} · ${fireMode} · ${w.range}m · ~${dps} dps</span>`;
+      b.onclick = () => { pickWeapon = w.id; buildLoadout(); pushLoadout(); };
+    }
     wl.appendChild(b);
   }
   const sl = document.getElementById('strat-list-pick')!;
@@ -128,8 +153,11 @@ function updateLobby() {
   hud.updateLobby(net.latestPlayers, net.selfId, net.hostId, net.room);
 }
 
-// re-send the chosen loadout once we're actually connected to a squad
-net.on('welcome', () => pushLoadout());
+// re-send the chosen loadout once we're actually connected to a squad, and
+// rebuild the picker now that we know the account's level/unlocks
+net.on('welcome', () => { buildLoadout(); pushLoadout(); });
+// a mission's rewards can unlock weapons / change rank — refresh the picker
+net.on('progress', () => buildLoadout());
 
 function enterGame() {
   inGame = true;

@@ -28,6 +28,18 @@ export interface PlayerState {
   kills: number;
   boarded: boolean;
   weapon?: string; // equipped weapon id
+  level?: number; // account level (for squad display)
+}
+
+// A player's persistent account snapshot, sent on join and after each mission.
+export interface ProfileState {
+  level: number;
+  xp: number; // cumulative lifetime XP
+  into: number; // XP earned into the current level
+  span: number; // XP the current level spans
+  unlocked: string[]; // weapon ids available at this level
+  kills: number; // lifetime kills
+  missions: number; // lifetime missions completed
 }
 
 export interface BugState {
@@ -103,7 +115,7 @@ export interface NestState {
 }
 
 export type ClientMsg =
-  | { type: 'join'; v: number; name: string; room?: string }
+  | { type: 'join'; v: number; name: string; room?: string; pid?: string } // pid = persistent account id
   | { type: 'start' }
   | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
@@ -124,6 +136,7 @@ export type ServerMsg =
       host: string;
       mission: MissionState;
       players: PlayerState[];
+      profile: ProfileState; // the joining player's account
     }
   | { type: 'error'; reason: string }
   | { type: 'joined'; player: PlayerState }
@@ -155,6 +168,16 @@ export type ServerMsg =
   | { type: 'reinforced'; ids: string[]; pos: Vec3 }
   | { type: 'phase'; mission: MissionState }
   | { type: 'boarded'; id: string }
+  // post-mission rewards: XP gained (with a breakdown), the updated profile, and
+  // any weapons newly unlocked by a level-up this mission.
+  | {
+      type: 'progress';
+      xpGained: number;
+      leveledTo?: number; // present only when the player gained a level
+      unlockedNew: string[]; // weapon ids newly available
+      breakdown: { label: string; xp: number }[];
+      profile: ProfileState;
+    }
   | { type: 'pong'; t: number; now: number };
 
 export function parseClientMsg(raw: string): ClientMsg | null {

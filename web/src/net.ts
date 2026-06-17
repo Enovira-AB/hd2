@@ -7,12 +7,23 @@ import type {
   FireZoneState,
   MissionState,
   PlayerState,
+  ProfileState,
   ProjectileState,
   SentryState,
   ServerMsg,
   SupplyState,
 } from '../../shared/protocol.js';
 import { INTERP_DELAY_MS, PROTOCOL_VERSION } from '../../shared/constants.js';
+
+// A stable per-browser account id, generated once and kept in localStorage.
+function persistentId(): string {
+  let id = localStorage.getItem('pid');
+  if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+    id = 'p-' + (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/[^A-Za-z0-9_-]/g, '');
+    localStorage.setItem('pid', id);
+  }
+  return id;
+}
 
 interface Snapshot {
   t: number;
@@ -43,6 +54,8 @@ export class Net {
   latestSnapT = 0; // server clock (ms) of the most recent snapshot
   boss: { id: number; hp: number; hpMax: number } | null = null;
   connected = false;
+  profile: ProfileState | null = null; // this account's latest progression snapshot
+  lastProgress: Extract<ServerMsg, { type: 'progress' }> | null = null; // most recent mission rewards
 
   on(type: ServerMsg['type'], fn: Handler) {
     const list = this.handlers.get(type) ?? [];
@@ -58,7 +71,7 @@ export class Net {
       this.ws = ws;
       let settled = false;
       ws.onopen = () => {
-        this.send({ type: 'join', v: PROTOCOL_VERSION, name, room: room || undefined });
+        this.send({ type: 'join', v: PROTOCOL_VERSION, name, room: room || undefined, pid: persistentId() });
       };
       ws.onerror = () => {
         if (!settled) reject(new Error('Could not reach the game server'));
@@ -76,6 +89,7 @@ export class Net {
           this.hostId = msg.host;
           this.mission = msg.mission;
           this.latestPlayers = msg.players;
+          this.profile = msg.profile;
           this.connected = true;
           this.startPing();
           settled = true;
@@ -107,6 +121,10 @@ export class Net {
         break;
       case 'phase':
         this.mission = msg.mission;
+        break;
+      case 'progress':
+        this.profile = msg.profile; // banked XP/level/unlocks after a mission
+        this.lastProgress = msg;
         break;
       case 'left':
         this.hostId = msg.host;

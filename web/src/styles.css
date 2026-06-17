@@ -89,6 +89,24 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 
 #lobby-code { font-size: clamp(56px, 14vw, 110px); }
 
+/* account rank + XP bar */
+#account { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 8px 0 2px; }
+#account-rank { font-size: 12px; letter-spacing: 0.2em; color: var(--yellow); font-weight: 800; }
+#account-bar { width: min(320px, 50vw); height: 5px; background: rgba(255,255,255,0.12); overflow: hidden; }
+#account-fill { height: 100%; background: var(--yellow); transition: width 0.4s ease; }
+#account-xp { font-size: 10px; letter-spacing: 0.12em; opacity: 0.6; }
+
+/* post-mission rewards */
+#summary-rewards { margin: 14px auto; max-width: 360px; }
+.rw-xp { font-size: 30px; font-weight: 800; color: var(--yellow); letter-spacing: 0.04em; }
+.rw-row { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.7; letter-spacing: 0.1em; padding: 2px 0; }
+.rw-levelup { margin-top: 8px; color: var(--yellow); font-weight: 800; letter-spacing: 0.2em; animation: pulse 1s ease-in-out infinite; }
+.rw-level { margin-top: 8px; font-size: 11px; letter-spacing: 0.2em; opacity: 0.8; }
+.rw-bar { height: 6px; background: rgba(255,255,255,0.12); overflow: hidden; margin: 5px 0; }
+.rw-bar > div { height: 100%; background: var(--yellow); }
+.rw-unlock { margin-top: 8px; font-size: 11px; letter-spacing: 0.12em; color: #8fe;  }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
 #loadout { display: flex; gap: 16px; justify-content: center; margin: 14px 0 4px; flex-wrap: wrap; }
 .loadout-col { text-align: left; min-width: 230px; }
 .loadout-head { font-size: 10px; letter-spacing: 0.3em; color: var(--yellow); opacity: 0.8; margin-bottom: 6px; }

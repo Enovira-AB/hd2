@@ -14,6 +14,7 @@ import {
 } from '../../shared/constants.js';
 import { terrainHeight, resolveCollisions, raycastRocks, type WorldLayout } from '../../shared/world.js';
 import { BUGFLAG, type Vec3, type HitKind } from '../../shared/protocol.js';
+import type { Profile } from './profiles.js';
 
 export interface SPlayer {
   id: string;
@@ -39,6 +40,10 @@ export interface SPlayer {
   diveDz: number;
   weapon: WeaponDef; // equipped primary
   loadout: string[]; // stratagem kinds brought this mission
+  profile: Profile; // persistent account
+  level: number; // cached account level (unlock checks + squad display)
+  mKillXp: number; // XP from kills this mission (committed at mission end)
+  mNestXp: number; // XP from sealing nests this mission
 }
 
 export interface SBug {

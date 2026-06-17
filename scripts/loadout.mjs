@@ -2,13 +2,23 @@
 // stratagem loadout gates what you can call (brought vs not brought).
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import WebSocket from 'ws';
 
 const PORT = 8146;
+const PID = 'testpid-loadout-0001';
 const OVERRIDES = { killBase: 300, killPerExtraPlayer: 0, bugCapBase: 6, spawnIntervalS: 0.3, dropDurationS: 0.5, resetDelayS: 1 };
 
+// seed a maxed account so every weapon (incl. the lvl-3 shotgun) is unlocked
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hd-loadout-'));
+fs.writeFileSync(path.join(dataDir, 'profiles.json'), JSON.stringify([
+  { pid: PID, name: 'Gunner', xp: 5000, kills: 0, missions: 0, created: Date.now(), updated: Date.now() },
+]));
+
 const server = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server/src/index.ts'], {
-  env: { ...process.env, PORT: String(PORT), HD_OBJECTIVE: 'ERADICATE', HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
+  env: { ...process.env, PORT: String(PORT), HD_OBJECTIVE: 'ERADICATE', HD_DATA_DIR: dataDir, HD_MISSION_OVERRIDES: JSON.stringify(OVERRIDES) },
   stdio: ['ignore', 'ignore', 'inherit'],
   detached: true,
 });
@@ -50,7 +60,7 @@ try {
     if (m.type === 'boom' && m.kind === 'ORBITAL') orbitalBoom = true;
   });
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', v: 1, name: 'Gunner' }));
+  ws.send(JSON.stringify({ type: 'join', v: 1, name: 'Gunner', pid: PID }));
 
   const me = () => snapshot?.players.find((p) => p.id === self);
 
@@ -140,6 +150,7 @@ try {
   console.log('\nLOADOUT TEST PASS — weapon stats + stratagem loadout gating verified.');
   clearTimeout(deadline);
   killServer();
+  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch {}
   process.exit(0);
 } catch (e) {
   fail(e.message ?? String(e));

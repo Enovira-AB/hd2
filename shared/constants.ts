@@ -64,6 +64,39 @@ export function weaponById(id: string): WeaponDef {
   return WEAPONS.find((w) => w.id === id) ?? WEAPONS[0];
 }
 
+// Progression: kills + mission completion earn XP; XP raises your level; levels
+// unlock weapons (WeaponDef.unlockLevel). Players start at level 1.
+export const PROGRESSION = {
+  // XP per kill, indexed by BUG_KINDS: scavenger, warrior, spitter, charger, titan
+  killXp: [2, 6, 5, 18, 80] as number[],
+  nestXp: 14, // sealing a nest
+  missionXp: 130, // bonus for completing a mission
+  failXpFactor: 0.35, // fraction of earned combat XP kept on a failed mission
+} as const;
+
+// XP needed to advance FROM `level` to the next one. Cheap early, then steeper,
+// so the first few unlocks come within a mission or two.
+export function xpToNext(level: number): number {
+  return 120 + 40 * (level - 1);
+}
+
+// Resolve cumulative XP into a level and progress within that level.
+export function levelForXp(xp: number): { level: number; into: number; span: number } {
+  let level = 1;
+  let rem = Math.max(0, Math.floor(xp));
+  // guard against pathological inputs; 200 levels is far beyond the unlock range
+  while (level < 200 && rem >= xpToNext(level)) {
+    rem -= xpToNext(level);
+    level++;
+  }
+  return { level, into: rem, span: xpToNext(level) };
+}
+
+// Weapon ids unlocked at or below a given level (rifle is always available).
+export function unlockedWeapons(level: number): string[] {
+  return WEAPONS.filter((w) => level >= w.unlockLevel).map((w) => w.id);
+}
+
 export interface BugKindDef {
   name: string;
   hp: number;
