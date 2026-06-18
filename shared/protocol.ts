@@ -27,6 +27,34 @@ export interface PlayerState {
   reserve: number;
   kills: number;
   boarded: boolean;
+  weapon?: string; // equipped weapon id
+  level?: number; // account level (for squad display)
+}
+
+// The galactic war: a server-wide campaign every squad contributes to.
+export interface PlanetState {
+  id: number;
+  name: string;
+  biome: string;
+  liberation: number; // 0..100
+  liberated: boolean;
+}
+export interface GalaxyState {
+  planets: PlanetState[];
+  activePlanet: number; // id of the planet the front is currently on
+  missionsWon: number; // server lifetime
+  totalKills: number; // server lifetime
+}
+
+// A player's persistent account snapshot, sent on join and after each mission.
+export interface ProfileState {
+  level: number;
+  xp: number; // cumulative lifetime XP
+  into: number; // XP earned into the current level
+  span: number; // XP the current level spans
+  unlocked: string[]; // weapon ids available at this level
+  kills: number; // lifetime kills
+  missions: number; // lifetime missions completed
 }
 
 export interface BugState {
@@ -85,6 +113,7 @@ export interface MissionState {
   phase: MissionPhase;
   seed: number;
   objective: MissionObjective;
+  difficulty: number; // selected difficulty tier id
   kills: number;
   killTarget: number;
   nestsLeft: number; // live bug nests (NESTS objective)
@@ -102,11 +131,13 @@ export interface NestState {
 }
 
 export type ClientMsg =
-  | { type: 'join'; v: number; name: string; room?: string }
+  | { type: 'join'; v: number; name: string; room?: string; pid?: string } // pid = persistent account id
   | { type: 'start' }
   | { type: 'state'; pos: Vec3; yaw: number; pitch: number; anim: number }
   | { type: 'fire'; origin: Vec3; dir: Vec3 }
   | { type: 'dive'; dir: Vec3 }
+  | { type: 'loadout'; weapon: string; stratagems: string[] } // chosen in the lobby
+  | { type: 'difficulty'; tier: number } // host picks the mission difficulty
   | { type: 'reload' }
   | { type: 'stratagem'; kind: string; target: Vec3 }
   | { type: 'interact' }
@@ -122,6 +153,8 @@ export type ServerMsg =
       host: string;
       mission: MissionState;
       players: PlayerState[];
+      profile: ProfileState; // the joining player's account
+      galaxy: GalaxyState; // current galactic-war state
     }
   | { type: 'error'; reason: string }
   | { type: 'joined'; player: PlayerState }
@@ -142,7 +175,7 @@ export type ServerMsg =
   | { type: 'fired'; id: string; origin: Vec3; dir: Vec3; hit: Vec3 | null; hitKind: HitKind }
   | { type: 'sentryFire'; id: number; from: Vec3; to: Vec3 } // turret tracer
   | { type: 'recon'; pos: Vec3 } // recon pulse ping (clients reveal nearby bugs)
-  | { type: 'bugDeath'; id: number; pos: Vec3; kind: number }
+  | { type: 'bugDeath'; id: number; pos: Vec3; kind: number; by?: string } // by = killer player id
   | { type: 'splat'; pos: Vec3; kind: number } // acid projectile impact
   | { type: 'nestDeath'; i: number; pos: Vec3 } // a nest was sealed/destroyed
   | { type: 'boss'; pos: Vec3 } // titan arrival
@@ -153,6 +186,23 @@ export type ServerMsg =
   | { type: 'reinforced'; ids: string[]; pos: Vec3 }
   | { type: 'phase'; mission: MissionState }
   | { type: 'boarded'; id: string }
+  // post-mission rewards: XP gained (with a breakdown), the updated profile, and
+  // any weapons newly unlocked by a level-up this mission.
+  | {
+      type: 'progress';
+      xpGained: number;
+      leveledTo?: number; // present only when the player gained a level
+      unlockedNew: string[]; // weapon ids newly available
+      breakdown: { label: string; xp: number }[];
+      profile: ProfileState;
+    }
+  // galactic-war update: broadcast after a won mission contributes liberation,
+  // with what just changed so the client can highlight it.
+  | {
+      type: 'galaxy';
+      galaxy: GalaxyState;
+      gained?: { planet: number; liberation: number; liberated: boolean };
+    }
   | { type: 'pong'; t: number; now: number };
 
 export function parseClientMsg(raw: string): ClientMsg | null {

@@ -1,7 +1,10 @@
 // DOM HUD: squad list, objective, ammo, stratagem uplink, banners, screens.
 
-import type { MissionState, PlayerState } from '../../shared/protocol.js';
-import { STRATAGEMS } from '../../shared/constants.js';
+import type { GalaxyState, MissionState, PlayerState, ServerMsg } from '../../shared/protocol.js';
+import { STRATAGEMS, difficultyById, weaponById } from '../../shared/constants.js';
+
+type Progress = Extract<ServerMsg, { type: 'progress' }>;
+type GalaxyGain = { planet: number; liberation: number; liberated: boolean } | null;
 
 const ARROW: Record<string, string> = { U: '▲', D: '▼', L: '◀', R: '▶' };
 
@@ -13,10 +16,22 @@ export class Hud {
   private bannerTimer = 0;
 
   constructor() {
-    const list = el('strat-list');
-    list.innerHTML = Object.values(STRATAGEMS)
-      .map((s) => `<div>${s.label.toUpperCase()} <b>${[...s.code].map((c) => ARROW[c]).join(' ')}</b></div>`)
+    this.setStratList(Object.keys(STRATAGEMS));
+  }
+
+  // The in-game stratagem cheat-sheet lists only what you brought.
+  setStratList(kinds: string[]) {
+    el('strat-list').innerHTML = kinds
+      .filter((k) => k in STRATAGEMS)
+      .map((k) => {
+        const s = STRATAGEMS[k as keyof typeof STRATAGEMS];
+        return `<div>${s.label.toUpperCase()} <b>${[...s.code].map((c) => ARROW[c]).join(' ')}</b></div>`;
+      })
       .join('');
+  }
+
+  setWeapon(name: string) {
+    el('weapon-name').textContent = name;
   }
 
   // ---- screens ----------------------------------------------------------------
@@ -46,17 +61,70 @@ export class Hud {
     el('lobby-wait').classList.toggle('hidden', isHost);
   }
 
-  showSummary(mission: MissionState, players: PlayerState[]) {
+  showSummary(
+    mission: MissionState,
+    players: PlayerState[],
+    progress?: Progress | null,
+    galaxy?: GalaxyState | null,
+    galaxyGain?: GalaxyGain,
+  ) {
     const won = mission.phase === 'COMPLETE';
     el('summary-title').textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED';
     (el('summary-title') as HTMLElement).style.color = won ? 'var(--yellow)' : 'var(--red)';
-    el('summary-sub').textContent = won
+    const diff = difficultyById(mission.difficulty).name;
+    el('summary-sub').textContent = (won
       ? 'DEMOCRACY HAS BEEN DELIVERED'
-      : 'LIBERTY WEEPS — BUT SUPER EARTH REMEMBERS';
+      : 'LIBERTY WEEPS — BUT SUPER EARTH REMEMBERS') + ` · ${diff}`;
+    this.renderRewards(progress);
+    this.renderLiberation(galaxy, galaxyGain);
     el('summary-players').innerHTML = players
       .map((p) => `<li><span>${esc(p.name)}</span><span>${p.kills} KILLS</span></li>`)
       .join('');
     this.showScreen('summary');
+  }
+
+  private renderRewards(progress?: Progress | null) {
+    const box = el('summary-rewards');
+    if (!progress) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    const { level, into, span } = progress.profile;
+    const pct = Math.max(0, Math.min(100, (into / Math.max(1, span)) * 100));
+    const breakdown = progress.breakdown
+      .map((b) => `<div class="rw-row"><span>${esc(b.label)}</span><span>+${b.xp}</span></div>`)
+      .join('');
+    const levelUp = progress.leveledTo
+      ? `<div class="rw-levelup">LEVEL UP — RANK ${progress.leveledTo}</div>`
+      : '';
+    const unlocks = progress.unlockedNew.length
+      ? `<div class="rw-unlock">UNLOCKED ${progress.unlockedNew.map((id) => esc(weaponById(id).name)).join(' · ')}</div>`
+      : '';
+    box.innerHTML = `
+      <div class="rw-xp">+${progress.xpGained} XP</div>
+      ${breakdown}
+      ${levelUp}
+      <div class="rw-level">RANK ${level}</div>
+      <div class="rw-bar"><div style="width:${pct}%"></div></div>
+      ${unlocks}`;
+  }
+
+  private renderLiberation(galaxy?: GalaxyState | null, gain?: GalaxyGain) {
+    const box = el('summary-liberation');
+    if (!galaxy || !gain) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    const planet = galaxy.planets.find((p) => p.id === gain.planet);
+    const name = planet?.name ?? 'THE FRONT';
+    const pct = planet ? Math.floor(planet.liberation) : 0;
+    box.innerHTML = gain.liberated
+      ? `<div class="lib-name">${name} LIBERATED ★</div>`
+      : `<div class="lib-name">${name} — FRONT ADVANCED</div>
+         <div class="lib-bar"><div style="width:${pct}%"></div></div>
+         <div class="lib-pct">${pct}% LIBERATED</div>`;
   }
 
   // ---- in-game -----------------------------------------------------------------
@@ -122,10 +190,11 @@ export class Hud {
     this.bannerTimer = window.setTimeout(() => el('center-banner').classList.add('hidden'), ms);
   }
 
-  hitmarker() {
+  hitmarker(kill = false) {
     const h = el('hitmarker');
+    h.classList.toggle('kill', kill);
     h.classList.add('show');
-    setTimeout(() => h.classList.remove('show'), 90);
+    setTimeout(() => h.classList.remove('show'), kill ? 160 : 90);
   }
 
   damageFlash(strength = 0.8) {

@@ -88,6 +88,78 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #menu-error { color: var(--red); font-size: 13px; letter-spacing: 0.15em; margin-top: 14px; min-height: 18px; }
 
 #lobby-code { font-size: clamp(56px, 14vw, 110px); }
+
+/* account rank + XP bar */
+#account { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 8px 0 2px; }
+#account-rank { font-size: 12px; letter-spacing: 0.2em; color: var(--yellow); font-weight: 800; }
+#account-bar { width: min(320px, 50vw); height: 5px; background: rgba(255,255,255,0.12); overflow: hidden; }
+#account-fill { height: 100%; background: var(--yellow); transition: width 0.4s ease; }
+#account-xp { font-size: 10px; letter-spacing: 0.12em; opacity: 0.6; }
+
+/* post-mission rewards */
+#summary-rewards { margin: 14px auto; max-width: 360px; }
+.rw-xp { font-size: 30px; font-weight: 800; color: var(--yellow); letter-spacing: 0.04em; }
+.rw-row { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.7; letter-spacing: 0.1em; padding: 2px 0; }
+.rw-levelup { margin-top: 8px; color: var(--yellow); font-weight: 800; letter-spacing: 0.2em; animation: pulse 1s ease-in-out infinite; }
+.rw-level { margin-top: 8px; font-size: 11px; letter-spacing: 0.2em; opacity: 0.8; }
+.rw-bar { height: 6px; background: rgba(255,255,255,0.12); overflow: hidden; margin: 5px 0; }
+.rw-bar > div { height: 100%; background: var(--yellow); }
+.rw-unlock { margin-top: 8px; font-size: 11px; letter-spacing: 0.12em; color: #8fe;  }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* galactic war (menu) */
+#galaxy { margin: 16px auto 4px; max-width: 460px; text-align: left; }
+.galaxy-head { font-size: 10px; letter-spacing: 0.3em; color: var(--yellow); opacity: 0.85; margin-bottom: 8px; }
+#galaxy-stats { opacity: 0.5; letter-spacing: 0.12em; }
+#galaxy-planets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.planet { opacity: 0.55; }
+.planet.active { opacity: 1; }
+.planet.liberated { opacity: 0.8; }
+.planet-row { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.08em; }
+.planet.active .planet-row span:first-child { color: var(--yellow); }
+.planet-bar { height: 4px; background: rgba(255,255,255,0.1); margin: 3px 0; overflow: hidden; }
+.planet-bar > div { height: 100%; background: var(--red); }
+.planet.active .planet-bar > div { background: var(--yellow); }
+.planet.liberated .planet-bar > div { background: #6f6; }
+.planet-biome { font-size: 8px; opacity: 0.45; letter-spacing: 0.14em; }
+
+/* liberation gain (summary) */
+#summary-liberation { margin: 12px auto; max-width: 360px; }
+.lib-name { font-size: 13px; letter-spacing: 0.18em; color: var(--yellow); font-weight: 800; }
+.lib-bar { height: 6px; background: rgba(255,255,255,0.12); overflow: hidden; margin: 5px 0; }
+.lib-bar > div { height: 100%; background: var(--yellow); transition: width 0.6s ease; }
+.lib-pct { font-size: 10px; letter-spacing: 0.15em; opacity: 0.6; }
+
+/* difficulty picker */
+#difficulty { margin: 10px auto 2px; max-width: 540px; }
+#diff-current { color: var(--yellow); opacity: 0.9; }
+#diff-list { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.diff-btn {
+  flex: 1 1 0; min-width: 84px; background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.12); border-top: 3px solid transparent;
+  color: var(--text); padding: 6px 4px; cursor: pointer; font-weight: 800; font-size: 16px;
+}
+.diff-btn .dl { display: block; font-size: 8px; font-weight: 600; opacity: 0.6; letter-spacing: 0.12em; margin-top: 2px; }
+.diff-btn:not(:disabled):hover { border-color: rgba(255,217,74,0.3); }
+.diff-btn.on { border-top-color: var(--yellow); background: rgba(255,217,74,0.1); color: #fff; }
+.diff-btn.locked, .diff-btn:disabled { opacity: 0.4; cursor: default; }
+
+#loadout { display: flex; gap: 16px; justify-content: center; margin: 14px 0 4px; flex-wrap: wrap; }
+.loadout-col { text-align: left; min-width: 230px; }
+.loadout-head { font-size: 10px; letter-spacing: 0.3em; color: var(--yellow); opacity: 0.8; margin-bottom: 6px; }
+#strat-count { opacity: 0.6; }
+.pick {
+  display: block; width: 100%; text-align: left;
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);
+  border-left: 3px solid transparent;
+  color: var(--text); padding: 7px 11px; margin: 4px 0; cursor: pointer;
+  font-size: 12px; letter-spacing: 0.06em;
+}
+.pick:hover { border-color: rgba(255,217,74,0.3); }
+.pick.on { border-left-color: var(--yellow); background: rgba(255,217,74,0.08); color: #fff; }
+.pick .sub { display: block; font-size: 9px; opacity: 0.5; letter-spacing: 0.1em; margin-top: 2px; }
+.pick.locked { opacity: 0.35; cursor: not-allowed; }
+.pick .arrows { color: var(--yellow); letter-spacing: 0.15em; }
 #lobby-players, #summary-players { list-style: none; margin: 18px 0; }
 #lobby-players li, #summary-players li {
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -120,6 +192,11 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
   transition: opacity 0.05s;
 }
 #hitmarker.show { opacity: 1; }
+#hitmarker.kill {
+  width: 30px; height: 30px;
+  border-color: var(--red);
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.25);
+}
 
 #damage-vignette {
   position: absolute; inset: 0;
@@ -141,6 +218,7 @@ input::placeholder { color: rgba(215, 221, 230, 0.35); letter-spacing: 0.2em; }
 #objective-sub { font-size: 11px; letter-spacing: 0.18em; opacity: 0.85; margin-top: 4px; }
 
 #status { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); text-align: right; }
+#weapon-name { font-size: 10px; letter-spacing: 0.18em; color: var(--yellow); opacity: 0.85; margin-bottom: 2px; text-shadow: 0 1px 2px #000; }
 #ammo { font-size: 30px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px #000; letter-spacing: 0.06em; }
 #ammo-sep { opacity: 0.4; margin: 0 6px; }
 #ammo-reserve { font-size: 18px; opacity: 0.75; }

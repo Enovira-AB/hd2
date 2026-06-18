@@ -10,6 +10,8 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { parseClientMsg } from '../../shared/protocol.js';
 import { PROTOCOL_VERSION } from '../../shared/constants.js';
 import { Room } from './room.js';
+import { flush as flushProfiles } from './profiles.js';
+import { flush as flushGalaxy, galaxyState } from './galaxy.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +23,8 @@ const webDist = path.join(repoRoot, 'dist', 'web');
 
 const app = express();
 app.get('/healthz', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+// lets the menu show the galactic war before joining a squad
+app.get('/galaxy', (_req, res) => res.json(galaxyState()));
 if (fs.existsSync(webDist)) {
   app.use(express.static(webDist));
   // SPA fallback for navigation routes only. A request for a path with a file
@@ -84,7 +88,7 @@ wss.on('connection', (ws: WebSocket) => {
       } else {
         target = createRoom();
       }
-      const player = target.addPlayer(ws, msg.name);
+      const player = target.addPlayer(ws, msg.name, msg.pid);
       if (player) room = target;
       return;
     }
@@ -105,3 +109,12 @@ server.listen(PORT, () => {
     console.log('dist/web not found — run `npm run build:web` to serve the client from this process.');
   }
 });
+
+// Persist any pending profile + galaxy changes before the process goes away.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    flushProfiles();
+    flushGalaxy();
+    process.exit(0);
+  });
+}

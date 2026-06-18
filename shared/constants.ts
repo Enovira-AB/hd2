@@ -35,6 +35,110 @@ export const RIFLE = {
   reloadTime: 2.2,
 } as const;
 
+// Primary weapons. The rifle keeps RIFLE's stats so existing behaviour/tests
+// are unchanged when no loadout is chosen.
+export interface WeaponDef {
+  id: string;
+  name: string;
+  damage: number;
+  magSize: number;
+  reserveMax: number;
+  fireInterval: number; // seconds between shots
+  range: number;
+  reloadTime: number;
+  spread: number; // radians of cone (per pellet)
+  pellets: number; // >1 for shotguns
+  auto: boolean; // hold to fire vs tap
+  unlockLevel: number;
+}
+
+export const WEAPONS: WeaponDef[] = [
+  { id: 'rifle', name: 'AR-23 Liberator', damage: 34, magSize: 30, reserveMax: 240, fireInterval: 0.1, range: 140, reloadTime: 2.2, spread: 0.012, pellets: 1, auto: true, unlockLevel: 0 },
+  { id: 'smg', name: 'MP-98 Knight', damage: 22, magSize: 45, reserveMax: 270, fireInterval: 0.07, range: 80, reloadTime: 1.9, spread: 0.03, pellets: 1, auto: true, unlockLevel: 2 },
+  { id: 'shotgun', name: 'SG-8 Punisher', damage: 15, magSize: 8, reserveMax: 64, fireInterval: 0.5, range: 36, reloadTime: 2.8, spread: 0.11, pellets: 9, auto: false, unlockLevel: 3 },
+  { id: 'mg', name: 'MG-43 Stalwart', damage: 30, magSize: 100, reserveMax: 400, fireInterval: 0.055, range: 120, reloadTime: 4.2, spread: 0.05, pellets: 1, auto: true, unlockLevel: 5 },
+  { id: 'sniper', name: 'R-63 Diligence', damage: 115, magSize: 12, reserveMax: 96, fireInterval: 0.34, range: 250, reloadTime: 2.6, spread: 0.002, pellets: 1, auto: false, unlockLevel: 7 },
+];
+
+export function weaponById(id: string): WeaponDef {
+  return WEAPONS.find((w) => w.id === id) ?? WEAPONS[0];
+}
+
+// Progression: kills + mission completion earn XP; XP raises your level; levels
+// unlock weapons (WeaponDef.unlockLevel). Players start at level 1.
+export const PROGRESSION = {
+  // XP per kill, indexed by BUG_KINDS: scavenger, warrior, spitter, charger, titan
+  killXp: [2, 6, 5, 18, 80] as number[],
+  nestXp: 14, // sealing a nest
+  missionXp: 130, // bonus for completing a mission
+  failXpFactor: 0.35, // fraction of earned combat XP kept on a failed mission
+} as const;
+
+// XP needed to advance FROM `level` to the next one. Cheap early, then steeper,
+// so the first few unlocks come within a mission or two.
+export function xpToNext(level: number): number {
+  return 120 + 40 * (level - 1);
+}
+
+// Resolve cumulative XP into a level and progress within that level.
+export function levelForXp(xp: number): { level: number; into: number; span: number } {
+  let level = 1;
+  let rem = Math.max(0, Math.floor(xp));
+  // guard against pathological inputs; 200 levels is far beyond the unlock range
+  while (level < 200 && rem >= xpToNext(level)) {
+    rem -= xpToNext(level);
+    level++;
+  }
+  return { level, into: rem, span: xpToNext(level) };
+}
+
+// Weapon ids unlocked at or below a given level (rifle is always available).
+export function unlockedWeapons(level: number): string[] {
+  return WEAPONS.filter((w) => level >= w.unlockLevel).map((w) => w.id);
+}
+
+// Difficulty tiers scale the whole mission. The baseline tier (CHALLENGING)
+// leaves everything at ×1 so the default game is unchanged; harder tiers add
+// more, tougher, heavier enemies and pay out more XP. Tiers unlock with rank.
+export interface DifficultyDef {
+  id: number; // 1..N, shown to players
+  name: string;
+  bugCapMult: number; // concurrent enemy cap
+  spawnMult: number; // ×spawn interval (<1 = spawns come faster)
+  hpMult: number; // enemy health
+  dmgMult: number; // enemy damage
+  heavyBias: number; // 0..1, shifts the spawn table toward warriors/chargers
+  killMult: number; // eradicate quota
+  xpMult: number; // reward payout
+  unlockLevel: number; // account rank required to select
+}
+
+export const DIFFICULTIES: DifficultyDef[] = [
+  { id: 1, name: 'TRIVIAL',     bugCapMult: 0.7, spawnMult: 1.35, hpMult: 0.85, dmgMult: 0.7,  heavyBias: 0.0,  killMult: 0.7, xpMult: 0.7, unlockLevel: 1 },
+  { id: 2, name: 'CHALLENGING', bugCapMult: 1.0, spawnMult: 1.0,  hpMult: 1.0,  dmgMult: 1.0,  heavyBias: 0.1,  killMult: 1.0, xpMult: 1.0, unlockLevel: 1 },
+  { id: 3, name: 'HARD',        bugCapMult: 1.3, spawnMult: 0.82, hpMult: 1.25, dmgMult: 1.2,  heavyBias: 0.25, killMult: 1.3, xpMult: 1.5, unlockLevel: 3 },
+  { id: 4, name: 'EXTREME',     bugCapMult: 1.6, spawnMult: 0.68, hpMult: 1.55, dmgMult: 1.45, heavyBias: 0.4,  killMult: 1.6, xpMult: 2.1, unlockLevel: 5 },
+  { id: 5, name: 'HELLDIVE',    bugCapMult: 2.0, spawnMult: 0.55, hpMult: 2.0,  dmgMult: 1.8,  heavyBias: 0.6,  killMult: 2.0, xpMult: 3.0, unlockLevel: 8 },
+];
+
+export function difficultyById(id: number): DifficultyDef {
+  return DIFFICULTIES.find((d) => d.id === id) ?? DIFFICULTIES[1]; // default: CHALLENGING (×1)
+}
+
+// Galactic war: a persistent, server-wide campaign. Every completed mission
+// liberates a slice of the active planet; harder tiers push more. When a planet
+// hits 100% the front advances to the next. Shared by all squads on the server.
+export const PLANETS: { id: number; name: string; biome: string }[] = [
+  { id: 1, name: 'MERIDIA', biome: 'ASH WASTES' },
+  { id: 2, name: 'VANDALON IV', biome: 'FROZEN TUNDRA' },
+  { id: 3, name: 'HELLMIRE', biome: 'VOLCANIC SCARP' },
+  { id: 4, name: 'ESTANU', biome: 'TOXIC JUNGLE' },
+  { id: 5, name: 'CHOOHE', biome: 'DUST BOWL' },
+  { id: 6, name: 'TARSH', biome: 'IRRADIATED FLATS' },
+];
+
+export const GALAXY = { libPerMission: 4 } as const; // % liberated per win at ×1
+
 export interface BugKindDef {
   name: string;
   hp: number;

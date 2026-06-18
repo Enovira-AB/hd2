@@ -42,7 +42,12 @@ try {
   ws.on('error', (e) => fail(`ws error: ${e.message}`));
   ws.on('message', (raw) => {
     const m = JSON.parse(raw.toString());
-    if (m.type === 'welcome') { self = m.self; ws.send(JSON.stringify({ type: 'start' })); }
+    if (m.type === 'welcome') {
+      self = m.self;
+      // bring exactly the stratagems this test exercises (REINFORCE is auto-added)
+      ws.send(JSON.stringify({ type: 'loadout', weapon: 'rifle', stratagems: ['RECON', 'SENTRY', 'NAPALM', 'ORBITAL'] }));
+      ws.send(JSON.stringify({ type: 'start' }));
+    }
     if (m.type === 'snapshot') {
       if (m.sentries && m.sentries.length) seen.sentry = true;
       firing = !!(m.fires && m.fires.length);

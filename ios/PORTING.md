@@ -37,9 +37,29 @@ nests loop). Never reorder, never early-return differently.
   decoder maps them to `.unknown`.
 - `join` carries `v` (protocol version); the server rejects mismatches, so bump
   `K.protocolVersion` together with `PROTOCOL_VERSION` in `shared/constants.ts`.
+  `join` also carries an optional `pid` (persistent account id) — generate one
+  once and keep it in the keychain/`UserDefaults`.
 - Positions are `[x, y, z]` meter arrays; yaw is `atan2(dx, dz)` radians
   (0 faces +Z); times are server epoch milliseconds. Convert with the clock
   offset from `pong` (see `NetClient.serverNow()`), never with the device clock.
+
+### Progression surface (added after v0.1 — mirror in `Protocol.swift`)
+
+These are additive; an old client that ignores them still plays, but a full
+port should handle them (see `docs/DESIGN.md` §7):
+
+- **client → server:** `loadout { weapon, stratagems[] }`, `difficulty { tier }`.
+- **server → client:** `progress { xpGained, leveledTo?, unlockedNew[], breakdown[], profile }`,
+  `galaxy { galaxy, gained? }`.
+- **`welcome`** now also carries `profile` (`ProfileState`) and `galaxy`
+  (`GalaxyState`).
+- **`MissionState`** gained `difficulty` (tier id); **`PlayerState`** gained
+  `weapon` (id) and `level`.
+- New data tables to mirror in `Constants.swift`: `WEAPONS`, `DIFFICULTIES`,
+  `PROGRESSION` (+ `xpToNext`/`levelForXp`), `PLANETS`, `GALAXY`.
+- New HTTP route: `GET /galaxy` returns the `GalaxyState` for the cold menu.
+- Server persists accounts + the war under `server/data/` (`HD_DATA_DIR`
+  overrides); the client stores nothing authoritative.
 
 ## 3. What is deliberately NOT shared
 

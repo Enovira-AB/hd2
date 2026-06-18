@@ -33,6 +33,7 @@
 
     <div id="status">
       <div id="hp-bar"><div id="hp-fill"></div></div>
+      <div id="weapon-name"></div>
       <div id="ammo"><span id="ammo-mag">30</span><span id="ammo-sep">|</span><span id="ammo-reserve">240</span></div>
     </div>
 
@@ -87,6 +88,12 @@
         <button id="btn-join" class="big-btn alt">JOIN SQUAD</button>
       </div>
       <p id="menu-error"></p>
+
+      <div id="galaxy" class="hidden">
+        <div class="galaxy-head">GALACTIC WAR <span id="galaxy-stats"></span></div>
+        <div id="galaxy-planets"></div>
+      </div>
+
       <p class="hint">
         DESKTOP&nbsp; WASD move · mouse aim · LMB fire · R reload · E use · SHIFT sprint · T stratagem (then WASD/arrows)<br />
         MOBILE&nbsp; left stick move · right side aim · buttons fire/strat — landscape recommended
@@ -101,6 +108,29 @@
       <h1 id="lobby-code">····</h1>
       <p class="hint">share this code (or the page URL) — squadmates can drop in mid-mission</p>
       <ul id="lobby-players"></ul>
+
+      <div id="account" class="hidden">
+        <span id="account-rank">RANK 1</span>
+        <div id="account-bar"><div id="account-fill"></div></div>
+        <span id="account-xp"></span>
+      </div>
+
+      <div id="difficulty">
+        <div class="loadout-head">DIFFICULTY <span id="diff-current"></span></div>
+        <div id="diff-list"></div>
+      </div>
+
+      <div id="loadout">
+        <div class="loadout-col">
+          <div class="loadout-head">PRIMARY</div>
+          <div id="weapon-list"></div>
+        </div>
+        <div class="loadout-col">
+          <div class="loadout-head">STRATAGEMS <span id="strat-count"></span></div>
+          <div id="strat-list-pick"></div>
+        </div>
+      </div>
+
       <button id="btn-start" class="big-btn hidden">DEPLOY ⬇</button>
       <p id="lobby-wait" class="hint">waiting for host to deploy…</p>
     </div>
@@ -111,6 +141,8 @@
     <div class="screen-inner">
       <h1 id="summary-title"></h1>
       <p id="summary-sub" class="tagline"></p>
+      <div id="summary-rewards" class="hidden"></div>
+      <div id="summary-liberation" class="hidden"></div>
       <ul id="summary-players"></ul>
       <p class="hint">returning to ship…</p>
     </div>
