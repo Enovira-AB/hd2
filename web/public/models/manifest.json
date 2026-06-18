@@ -1,5 +1,5 @@
 {
-  "_comment": "Drop-in GLB models replace the procedural ones. Value = filename, or { file, yaw, height }. yaw rotates a model that faces the wrong way (try 3.14159). Keys: soldier, bug0 scavenger, bug1 warrior, bug2 spitter, bug3 charger, bug4 titan. null = procedural. See README.md.",
+  "_comment": "Drop-in GLB models replace the procedural ones. Value = filename, or { file, yaw, height, tint, emissive, emissiveIntensity, squashXZ, anims }. yaw rotates a model that faces the wrong way (try 3.14159). tint multiplies material colour, emissive adds a glow, squashXZ scales width vs height (<1 lanky, >1 squat) so a shared base mesh reads as a distinct creature. Keys: soldier, bug0 scavenger, bug1 warrior, bug2 spitter, bug3 charger, bug4 titan. null = procedural insectoid fallback (see bugs.ts). See README.md.",
   "soldier": {
     "file": "vanguard.glb",
     "yaw": 0,
@@ -14,7 +14,19 @@
       "strafe_r": "anims/strafe_r.glb"
     }
   },
-  "bug0": null,
+  "bug0": {
+    "file": "maw.glb",
+    "height": 1.05,
+    "squashXZ": 1.2,
+    "tint": "#cdd2ae",
+    "emissive": "#7fe3c0",
+    "emissiveIntensity": 0.35,
+    "anims": {
+      "idle": "anims/mutant_idle.glb",
+      "run": "anims/mutant_run.glb",
+      "attack": "anims/mutant_swipe.glb"
+    }
+  },
   "bug1": {
     "file": "maw.glb",
     "height": 1.9,
@@ -24,7 +36,19 @@
       "attack": "anims/mutant_swipe.glb"
     }
   },
-  "bug2": null,
+  "bug2": {
+    "file": "maw.glb",
+    "height": 1.5,
+    "squashXZ": 0.82,
+    "tint": "#86b24a",
+    "emissive": "#9aff3a",
+    "emissiveIntensity": 0.8,
+    "anims": {
+      "idle": "anims/mutant_idle.glb",
+      "run": "anims/mutant_run.glb",
+      "attack": "anims/mutant_swipe.glb"
+    }
+  },
   "bug3": {
     "file": "warrok.glb",
     "height": 2.4,
@@ -34,5 +58,17 @@
       "attack": "anims/mutant_swipe.glb"
     }
   },
-  "bug4": null
+  "bug4": {
+    "file": "warrok.glb",
+    "height": 6.0,
+    "squashXZ": 1.15,
+    "tint": "#4d4a57",
+    "emissive": "#ff5a1e",
+    "emissiveIntensity": 0.55,
+    "anims": {
+      "idle": "anims/mutant_idle.glb",
+      "run": "anims/mutant_run.glb",
+      "attack": "anims/mutant_swipe.glb"
+    }
+  }
 }

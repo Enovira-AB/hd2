@@ -46,17 +46,30 @@ const TARGET_HEIGHT: Record<string, number> = {
   soldier: 1.95, bug0: 0.95, bug1: 1.55, bug2: 1.4, bug3: 2.4, bug4: 6.0,
 };
 
-// A manifest entry is a filename, or an object for tuning facing/height and
-// adding extra animation clips without touching code:
+// A manifest entry is a filename, or an object for tuning facing/height,
+// re-skinning a shared mesh into a distinct creature, and adding animation
+// clips without touching code:
 //   { "file": "x.glb", "yaw": 3.14159, "height": 2,
+//     "tint": "#7faa3a", "emissive": "#9aff3a", "emissiveIntensity": 0.7,
+//     "squashXZ": 0.85,
 //     "anims": { "back": "anims/run_back.glb", "strafe": "anims/strafe.glb" } }
 // `yaw` rotates the model if it faces the wrong way (glTF forward is +Z; if a
-// model walks backwards, set yaw to Math.PI ≈ 3.14159). `anims` merges extra
-// skeletal clips (e.g. Mixamo directional anims) onto the same rig by name.
-type ManifestEntry =
-  | string
-  | { file: string; yaw?: number; height?: number; anims?: Record<string, string> }
-  | null;
+// model walks backwards, set yaw to Math.PI ≈ 3.14159). `tint` multiplies every
+// material colour (keeps texture detail), `emissive`/`emissiveIntensity` add a
+// bioluminescent glow, and `squashXZ` scales width vs height so the same base
+// mesh reads as a different silhouette (<1 lanky, >1 squat). `anims` merges
+// extra skeletal clips (e.g. Mixamo directional anims) onto the same rig by name.
+interface ModelEntry {
+  file: string;
+  yaw?: number;
+  height?: number;
+  tint?: string;
+  emissive?: string;
+  emissiveIntensity?: number;
+  squashXZ?: number;
+  anims?: Record<string, string>;
+}
+type ManifestEntry = string | ModelEntry | null;
 
 // Fire-and-forget at boot. Reads /models/manifest.json (always shipped, so no
 // 404s) and only loads the GLBs it actually lists; anything unlisted keeps its
@@ -75,12 +88,17 @@ export async function preloadModels() {
     const file = typeof entry === 'string' ? entry : entry?.file;
     if (!file) return;
     const obj = typeof entry === 'object' && entry ? entry : null;
-    const yaw = obj?.yaw ?? 0;
-    const height = obj?.height ?? TARGET_HEIGHT[key] ?? 1.8;
-    const extraAnims = obj?.anims
-      ? Object.entries(obj.anims).map(([k, f]) => ({ key: k, file: f }))
-      : [];
-    void loadModel(`/models/${file}`, height, yaw, extraAnims).then((m) => {
+    void loadModel(`/models/${file}`, {
+      height: obj?.height ?? TARGET_HEIGHT[key] ?? 1.8,
+      yaw: obj?.yaw ?? 0,
+      tint: obj?.tint,
+      emissive: obj?.emissive,
+      emissiveIntensity: obj?.emissiveIntensity,
+      squashXZ: obj?.squashXZ,
+      extraAnims: obj?.anims
+        ? Object.entries(obj.anims).map(([k, f]) => ({ key: k, file: f }))
+        : [],
+    }).then((m) => {
       if (m) set(m);
     });
   };
@@ -92,26 +110,55 @@ export async function preloadModels() {
   load('bug4', (m) => (registry.bugs[4] = m));
 }
 
-async function loadModel(
-  url: string,
-  targetHeight: number,
-  faceYaw: number,
-  extraAnims: { key: string; file: string }[] = [],
-): Promise<LoadedModel | null> {
+interface LoadOpts {
+  height: number;
+  yaw: number;
+  tint?: string;
+  emissive?: string;
+  emissiveIntensity?: number;
+  squashXZ?: number;
+  extraAnims: { key: string; file: string }[];
+}
+
+async function loadModel(url: string, opts: LoadOpts): Promise<LoadedModel | null> {
+  const { height: targetHeight, yaw: faceYaw, extraAnims } = opts;
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     const wrapper = new THREE.Group();
     wrapper.add(gltf.scene);
 
-    // normalize: scale to target height, feet on the ground, face +Z
+    // normalize: scale to target height, feet on the ground, face +Z.
+    // squashXZ widens/narrows only x/z so a shared mesh gets a new silhouette.
     gltf.scene.rotation.y += faceYaw;
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const size = box.getSize(new THREE.Vector3());
     const s = targetHeight / Math.max(0.01, size.y);
-    gltf.scene.scale.setScalar(s);
+    const sxz = s * (opts.squashXZ ?? 1);
+    gltf.scene.scale.set(sxz, s, sxz);
     box.setFromObject(gltf.scene);
     gltf.scene.position.y -= box.min.y;
+
+    // re-skin a shared base mesh into a distinct creature: multiply every
+    // material colour by `tint` (preserves baked texture detail) and add an
+    // emissive glow. Each manifest key parses its own GLTF, so these mutate
+    // only this creature's materials.
+    if (opts.tint || opts.emissive) {
+      const tint = opts.tint ? new THREE.Color(opts.tint) : null;
+      const glow = opts.emissive ? new THREE.Color(opts.emissive) : null;
+      gltf.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+          const m = mat as THREE.MeshStandardMaterial;
+          if (tint && m.color) m.color.multiply(tint);
+          if (glow && m.emissive) {
+            m.emissive.copy(glow);
+            m.emissiveIntensity = opts.emissiveIntensity ?? 0.6;
+          }
+        }
+      });
+    }
 
     // merge extra animation-only clips (same skeleton, bound by bone name).
     // Strip root/hip translation so the clip drives pose only — the game owns
